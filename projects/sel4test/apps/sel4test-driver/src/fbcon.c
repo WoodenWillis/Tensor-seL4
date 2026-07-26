@@ -42,7 +42,7 @@ extern struct driver_env env;
 #define SHD_REG_UP_REQ_GLOBAL   (1u << 31)
 
 #define FB_MAP_MAX  (16u << 20)
-#define SCALE       2u
+#define SCALE       3u
 #define GW          (8u * SCALE)     /* glyph cell width  in px */
 #define GH          (8u * SCALE)     /* glyph cell height in px */
 #define FG          0xFFFFFFFFu      /* white (0xAARRGGBB) */
