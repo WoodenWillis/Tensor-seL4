@@ -1,0 +1,22 @@
+#!/bin/bash
+
+
+echo "Pulling repo.."
+
+(
+  cd $HOME/Tensor-seL4
+  git pull
+) 
+echo "Repo pulled"
+
+echo "Emptying build directory.."
+
+rm -rf $HOME/Tensor-seL4/build/*
+
+echo "Build directory cleared. Restarting build workflow..."
+
+(
+	cd $HOME/Tensor-seL4/build
+	source ~/sel4-env/bin/activate
+	../init-build.sh -DPLATFORM=tensor-g4 && ninja && mkheader && mkimg
+)

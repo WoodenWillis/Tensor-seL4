@@ -1,0 +1,51 @@
+/ {
+    aliases {
+        serial0 = "/uart@10870000";
+    };
+
+    chosen {
+        seL4,elfloader-devices =
+            "serial0",
+            &{/psci},
+            &{/timer};
+        seL4,kernel-devices =
+            "serial0",
+            &{/interrupt-controller@10400000},
+            &{/timer};
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x0 0x80000000 0x35000000>;
+    };
+
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <1>;
+        ranges;
+
+        /* (gsa) */
+        gsa@90200000 {
+            reg = <0x0 0x90200000 0x400000>;    /* 4 MB */
+            no-map;
+        };
+
+        /* GXP scratchpad */
+        gxp_scratchpad@91300000 {
+            reg = <0x0 0x91300000 0xa0000>;     /* 640 KB */
+            no-map;
+        };
+
+        /* GXP firmware / mcu_fw / secure_data */
+        gxp_fw@91400000 {
+            reg = <0x0 0x91400000 0x1000000>;   /* 16 MB */
+            no-map;
+        };
+
+        /* tpu_fw, aoc, xhci_dma */
+        tpu_aoc@92e00000 {
+            reg = <0x0 0x92e00000 0x4600000>;   /* 70 MB */
+            no-map;
+        };
+    };
+};
