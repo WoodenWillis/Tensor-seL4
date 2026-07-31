@@ -1,0 +1,4 @@
+bin
+.git
+build
+.sel4_cache
