@@ -61,6 +61,7 @@
               pkgs.gnutar
               pkgs.qemu
               pkgs.android-tools
+              pkgs.picocom
             ];
 
             LIBCLANG_PATH = "${pkgs.llvmPackages_18.libclang.lib}/lib";
