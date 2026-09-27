@@ -1,0 +1,9 @@
+device            Pixel 9 Pro (caiman), SoC zumapro, revision MP1.0
+fingerprint       google/caiman/caiman:15/BP1A.250505.005/13277524:user/release-keys
+build_id          BP1A.250505.005
+bootloader        ripcurrentpro-15.2-13237002
+baseband          g5400c-241205-250127-B-12971716
+dtbo_idx          49
+source            running device, pulled 2026-09-26; TODO(will): record extraction method
+scrubbed_by       tools/scrub-dtb.sh
+sha256            f0078a689f25cb20a8e1a4ff699c5acc36e720309b3a57e113a0088fbc4d86cf
