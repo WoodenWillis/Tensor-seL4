@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: BSD-2-Clause -->
+<manifest>
+  <remote name="seL4" fetch="https://github.com/seL4" pushurl="no-push://upstream-is-read-only"/>
+  <remote name="au-ts" fetch="https://github.com/au-ts" pushurl="no-push://upstream-is-read-only"/>
+
+  <project name="microkit" path="microkit" remote="seL4"  revision="ec86afdcd662b5976d11d4994acf1b11a2979882"/>
+  <project name="seL4"     path="seL4"     remote="seL4"  revision="6e7c3b733d296cfd88d5fbf635c96e447a882374"/>
+  <project name="libvmm"   path="libvmm"   remote="au-ts" revision="d2e37165285a28c7eae95501594d0807ea482c9c"/>
+  <project name="sddf"     path="sddf"     remote="au-ts" revision="1fb88897e84f3634e701c6e4a9fc9fe689ac7fbd"/>
+</manifest>
