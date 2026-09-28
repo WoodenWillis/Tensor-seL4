@@ -1,0 +1,85 @@
+From 27c4c768301f686f0e7e730d023113ecfdbe915a Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 05:51:39 -0400
+Subject: [PATCH] loader: stop tensor-g4 cluster watchdogs
+
+ABL leaves watchdog_cl0 and watchdog_cl1 running and the phone resets
+once they expire, since nothing under seL4 kicks them. Clear ENABLE,
+RSTEN and INTEN in WTCON on both, as the vendor s3c2410_wdt stop path
+does, and log WTCON before and after so the state ABL left is recorded.
+---
+ loader/src/aarch64/init.c | 51 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 51 insertions(+)
+
+diff --git a/loader/src/aarch64/init.c b/loader/src/aarch64/init.c
+index 4f39df2..09b3644 100644
+--- a/loader/src/aarch64/init.c
++++ b/loader/src/aarch64/init.c
+@@ -71,6 +71,53 @@ static void configure_gicv2(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_PLAT_TENSOR_G4)
++#define WATCHDOG_CL0_BASE 0x10060000UL
++#define WATCHDOG_CL1_BASE 0x10070000UL
++#define WTCON             0x00
++#define WTCON_RSTEN       (1U << 0)
++#define WTCON_INTEN       (1U << 2)
++#define WTCON_ENABLE      (1U << 5)
++
++static uint32_t watchdog_read(uintptr_t base, uintptr_t reg)
++{
++    return *((volatile uint32_t *)(base + reg));
++}
++
++static void watchdog_write(uintptr_t base, uintptr_t reg, uint32_t val)
++{
++    *((volatile uint32_t *)(base + reg)) = val;
++}
++
++static void watchdog_stop(const char *name, uintptr_t base)
++{
++    uint32_t before = watchdog_read(base, WTCON);
++    watchdog_write(base, WTCON, before & ~(WTCON_ENABLE | WTCON_RSTEN | WTCON_INTEN));
++    uint32_t after = watchdog_read(base, WTCON);
++
++    puts("LDR|INFO: ");
++    puts(name);
++    puts(" WTCON ");
++    puthex32(before);
++    puts(" -> ");
++    puthex32(after);
++    puts("\n");
++
++    if (after & (WTCON_ENABLE | WTCON_RSTEN)) {
++        puts("LDR|ERROR: ");
++        puts(name);
++        puts(" still enabled after stop\n");
++        fail();
++    }
++}
++
++static void stop_watchdogs(void)
++{
++    watchdog_stop("watchdog_cl1", WATCHDOG_CL1_BASE);
++    watchdog_stop("watchdog_cl0", WATCHDOG_CL0_BASE);
++}
++#endif
++
+ void el1_mmu_disable(void);
+ void el2_mmu_disable(void);
+ 
+@@ -110,6 +157,10 @@ void arch_init(void)
+         fail();
+     }
+ 
++#if defined(CONFIG_PLAT_TENSOR_G4)
++    stop_watchdogs();
++#endif
++
+ #if !defined(ARM_PSCI_UNAVAILABLE)
+     uint32_t ret = arm_smc32_call(PSCI_FUNCTION_VERSION, /* unused */ 0, 0, 0);
+     /* the return value has no error codes, but if we get it wrong this is what we will get */
+-- 
+2.53.0
+
