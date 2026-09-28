@@ -1,0 +1,405 @@
+From 86b848b14a2ce40fd89614d8f48f90156572ccc4 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 01:00:28 -0400
+Subject: [PATCH] Add tensor-g4 platform for Google Tensor G4 (zumapro)
+
+The Pixel 9 Pro (caiman) runs a Tensor G4 SoC. This adds a seL4
+platform for it so the kernel can be built for the phone, with the
+memory map, GIC, timer and debug UART taken from the vendor DTB of
+build BP1A.250505.005.
+
+The debug UART at 0x10870000 is compatible "samsung,exynos-uart",
+which seL4 did not know. It gets its own driver, registered by that
+compatible string, and is added to the hardware.yml serial rule so
+hardware_gen can generate UART_PPTR for it.
+
+The GIC redistributor region is given its full DTB size of 0x200000.
+The kernel maps only the rule's kernel_size, so the generated header
+is unchanged; the DTS stays faithful to the hardware.
+
+RAM is limited to 0x80000000-0xb5000000, below sec_dram, with the
+firmware carveouts inside that window marked no-map.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../tensor-g4/sel4/plat/api/constants.h       |   9 ++
+ src/drivers/serial/config.cmake               |   2 +
+ src/drivers/serial/exynos-tensor-uart.c       |  98 ++++++++++++++++
+ src/plat/tensor-g4/config.cmake               |  34 ++++++
+ src/plat/tensor-g4/overlay-tensor-g4.dts      |  63 +++++++++++
+ tools/dts/tensor-g4.dts                       | 105 ++++++++++++++++++
+ tools/hardware.yml                            |   1 +
+ 7 files changed, 312 insertions(+)
+ create mode 100644 libsel4/sel4_plat_include/tensor-g4/sel4/plat/api/constants.h
+ create mode 100644 src/drivers/serial/exynos-tensor-uart.c
+ create mode 100644 src/plat/tensor-g4/config.cmake
+ create mode 100644 src/plat/tensor-g4/overlay-tensor-g4.dts
+ create mode 100644 tools/dts/tensor-g4.dts
+
+diff --git a/libsel4/sel4_plat_include/tensor-g4/sel4/plat/api/constants.h b/libsel4/sel4_plat_include/tensor-g4/sel4/plat/api/constants.h
+new file mode 100644
+index 000000000..673fe81b7
+--- /dev/null
++++ b/libsel4/sel4_plat_include/tensor-g4/sel4/plat/api/constants.h
+@@ -0,0 +1,9 @@
++/*
++ * Copyright 2026, WoodenWillis
++ *
++ * SPDX-License-Identifier: BSD-2-Clause
++ */
++#pragma once
++
++#include <sel4/config.h>
++#include <sel4/arch/constants_cortex_a55.h>
+diff --git a/src/drivers/serial/config.cmake b/src/drivers/serial/config.cmake
+index bc040b7e9..6c7336f9c 100644
+--- a/src/drivers/serial/config.cmake
++++ b/src/drivers/serial/config.cmake
+@@ -16,6 +16,8 @@ register_driver(compatibility_strings "fsl,imx8qxp-lpuart;fsl,imx7ulp-lpuart"
+                 PREFIX src/drivers/serial CFILES "imx-lpuart.c")
+ register_driver(compatibility_strings "samsung,exynos4210-uart" PREFIX src/drivers/serial
+                 CFILES "exynos4210-uart.c")
++register_driver(compatibility_strings "samsung,exynos-uart" PREFIX src/drivers/serial
++                CFILES "exynos-tensor-uart.c")
+ register_driver(compatibility_strings "qcom,msm-uartdm" PREFIX src/drivers/serial
+                 CFILES "msm-uartdm.c")
+ register_driver(compatibility_strings "xlnx,xuartps" PREFIX src/drivers/serial CFILES "xuartps.c")
+diff --git a/src/drivers/serial/exynos-tensor-uart.c b/src/drivers/serial/exynos-tensor-uart.c
+new file mode 100644
+index 000000000..280150ed3
+--- /dev/null
++++ b/src/drivers/serial/exynos-tensor-uart.c
+@@ -0,0 +1,98 @@
++/*
++ * Copyright (C) 2026 WoodenWillis
++ *
++ * SPDX-License-Identifier: GPL-2.0-only
++ *
++ */
++
++#include <config.h>
++#include <stdint.h>
++#include <util.h>
++#include <machine/io.h>
++#include <plat/machine/devices_gen.h>
++
++#define ULCON       0x00
++#define UCON        0x04
++#define UFCON       0x08
++#define UTRSTAT     0x10
++#define UFSTAT      0x18
++#define UTXH        0x20
++#define URXH        0x24
++
++/* UFCON */
++#define UFCON_FIFOMODE      BIT(0)
++
++#define UFSTAT_TXFULL       BIT(24)     /* S5PV210_UFSTAT_TXFULL */
++#define UFSTAT_RXFULL       BIT(8)      /* S5PV210_UFSTAT_RXFULL */
++#define UFSTAT_RXCOUNT      0xff        /* S5PV210_UFSTAT_RXMASK, shift 0 */
++
++/* UTRSTAT */
++#define UTRSTAT_TXE         BIT(2)      /* transmitter fully empty */
++#define UTRSTAT_TXFE        BIT(1)      /* transmit buffer empty */
++#define UTRSTAT_RXDR        BIT(0)      /* receive data ready */
++
++/* UCON: exynos_port_configured() == (ucon & 0xf) != 0 */
++#define UCON_MODE_MASK      0xf
++
++#define TX_SPIN_LIMIT       1000000
++
++#define UART_REG(x) ((volatile uint32_t *)(UART_PPTR + (x)))
++
++static inline bool_t tensor_uart_live(void)
++{
++    return (*UART_REG(UCON) & UCON_MODE_MASK) != 0;
++}
++
++#ifdef CONFIG_PRINTING
++
++void uart_drv_putchar(unsigned char c)
++{
++    uint32_t spins = 0;
++
++    /* Never write to a port nobody configured. */
++    if (!tensor_uart_live()) {
++        return;
++    }
++
++    if (*UART_REG(UFCON) & UFCON_FIFOMODE) {
++        while (*UART_REG(UFSTAT) & UFSTAT_TXFULL) {
++            if (++spins > TX_SPIN_LIMIT) {
++                return;
++            }
++        }
++    } else {
++        while (!(*UART_REG(UTRSTAT) & UTRSTAT_TXE)) {
++            if (++spins > TX_SPIN_LIMIT) {
++                return;
++            }
++        }
++    }
++
++    *UART_REG(UTXH) = (uint32_t)c;
++}
++
++#endif /* CONFIG_PRINTING */
++
++#ifdef CONFIG_DEBUG_BUILD
++
++unsigned char uart_drv_getchar(void)
++{
++    if (!tensor_uart_live()) {
++        return 0;
++    }
++
++    if (*UART_REG(UFCON) & UFCON_FIFOMODE) {
++        while (((*UART_REG(UFSTAT) & UFSTAT_RXCOUNT) == 0) &&
++               !(*UART_REG(UFSTAT) & UFSTAT_RXFULL)) {
++            /* spin */
++        }
++    } else {
++        while (!(*UART_REG(UTRSTAT) & UTRSTAT_RXDR)) {
++            /* spin */
++        }
++    }
++
++    return (unsigned char)(*UART_REG(URXH) & 0xff);
++}
++
++#endif /* CONFIG_DEBUG_BUILD */
+diff --git a/src/plat/tensor-g4/config.cmake b/src/plat/tensor-g4/config.cmake
+new file mode 100644
+index 000000000..5c5322693
+--- /dev/null
++++ b/src/plat/tensor-g4/config.cmake
+@@ -0,0 +1,34 @@
++#
++# Copyright 2026, WoodenWillis
++#
++# SPDX-License-Identifier: GPL-2.0-only
++#
++
++declare_platform(tensor-g4 KernelPlatformTensorG4 PLAT_TENSOR_G4 KernelSel4ArchAarch64)
++
++if(KernelPlatformTensorG4)
++	declare_seL4_arch(aarch64)
++	set(KernelArmCortexA55 ON)
++	set(KernelArchArmV8a ON)
++	set(KernelArmGicV3 ON)
++	config_set(KernelARMPlatform ARM_PLAT "tensor-g4")
++	list(APPEND KernelDTSList "tools/dts/tensor-g4.dts")
++	List(APPEND KernelDTSList "src/plat/tensor-g4/overlay-tensor-g4.dts")
++	declare_default_headers(
++		TIMER_FREQUENCY 24576000
++		MAX_IRQ 991
++		NUM_PPI 32
++		TIMER drivers/timer/arm_generic.h
++		CLK_SHIFT 51u
++		CLK_MAGIC 91625969u
++		KERNEL_WCET 10u
++		INTERRUPT_CONTROLLER arch/arm/arch/machine/gic_v3.h
++	)
++endif()
++
++add_sources(
++    DEP "KernelPlatformTensorG4"
++    CFILES
++        src/arch/arm/machine/gic_v3.c
++        src/arch/arm/machine/l2c_nop.c
++)
+diff --git a/src/plat/tensor-g4/overlay-tensor-g4.dts b/src/plat/tensor-g4/overlay-tensor-g4.dts
+new file mode 100644
+index 000000000..b3ac6d9c2
+--- /dev/null
++++ b/src/plat/tensor-g4/overlay-tensor-g4.dts
+@@ -0,0 +1,63 @@
++/ {
++    aliases {
++        serial0 = "/uart@10870000";
++    };
++
++    chosen {
++        seL4,elfloader-devices =
++            "serial0",
++            &{/psci},
++            &{/timer};
++        seL4,kernel-devices =
++            "serial0",
++            &{/interrupt-controller@10400000},
++            &{/timer};
++    };
++
++    memory@80000000 {
++        device_type = "memory";
++        reg = <0x0 0x80000000 0x35000000>;
++    };
++
++    /*
++     * Firmware/secure carveouts that live inside the DRAM window above.
++     * hardware_gen.py subtracts every child with both `reg` and `no-map`
++     * from the RAM seL4 hands out, so these ranges are never given to
++     * userspace as normal memory.
++     */
++    reserved-memory {
++        #address-cells = <2>;
++        #size-cells = <1>;
++        ranges;
++
++        /* ACPM */
++	ect_binary@90000000 {
++            reg = <0x0 0x90000000 0x60000>;     /* 384 KB */
++            no-map;
++        };
++
++        /* Google Security chip (gsa) */
++        gsa@90200000 {
++            reg = <0x0 0x90200000 0x400000>;    /* 4 MB */
++            no-map;
++        };
++
++        /* GXP scratchpad */
++        gxp_scratchpad@91300000 {
++            reg = <0x0 0x91300000 0xa0000>;     /* 640 KB */
++            no-map;
++        };
++
++        /* GXP firmware / mcu_fw / secure_data */
++        gxp_fw@91400000 {
++            reg = <0x0 0x91400000 0x1000000>;   /* 16 MB */
++            no-map;
++        };
++
++        /* tpu_fw, aoc, xhci_dma */
++        tpu_aoc@92e00000 {
++            reg = <0x0 0x92e00000 0x4600000>;   /* 70 MB */
++            no-map;
++        };
++    };
++};
+diff --git a/tools/dts/tensor-g4.dts b/tools/dts/tensor-g4.dts
+new file mode 100644
+index 000000000..3c75bde79
+--- /dev/null
++++ b/tools/dts/tensor-g4.dts
+@@ -0,0 +1,105 @@
++/dts-v1/;
++
++/ {
++    #address-cells = <2>;
++    #size-cells = <1>;
++    interrupt-parent = <&gic>;      /* label ref -- dtc resolves */
++
++    chosen {
++        seL4,elfloader-devices = "serial0";
++        seL4,kernel-devices = "serial0";
++    };
++
++    aliases { serial0 = &serial_0; };   /* label ref, not string path */
++
++    cpus {
++        #address-cells = <1>;
++        #size-cells = <0>;
++        cpu@0 {                          /* A520 little */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x0>;
++            enable-method = "psci";
++        };
++        cpu@100 {                        /* A520 little */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x100>;
++            enable-method = "psci";
++        };
++        cpu@200 {                        /* A520 little */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x200>;
++            enable-method = "psci";
++        };
++        cpu@300 {                        /* A520 little */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x300>;
++            enable-method = "psci";
++        };
++        cpu@400 {                        /* A720 mid */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x400>;
++            enable-method = "psci";
++        };
++        cpu@500 {                        /* A720 mid */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x500>;
++            enable-method = "psci";
++        };
++        cpu@600 {                        /* A720 mid */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x600>;
++            enable-method = "psci";
++        };
++        cpu@700 {                        /* X4 prime */
++            device_type = "cpu";
++            compatible = "arm,armv8";
++            reg = <0x700>;
++            enable-method = "psci";
++        };
++    };
++
++    psci {
++        compatible = "arm,psci-1.0";
++        method = "smc";
++    };
++
++    gic: interrupt-controller@10400000 {
++    	compatible = "arm,gic-v3";
++    	#interrupt-cells = <4>;
++    	#address-cells = <2>;
++    	#size-cells = <1>;
++    	interrupt-controller;
++    	reg = <0x0 0x10400000 0x10000>,     /* GICD */
++              <0x0 0x10440000 0x200000>;    /* GICR */
++    	interrupts = <1 9 4 0>;
++    };
++
++
++    timer {
++        compatible = "arm,armv8-timer";
++        interrupts = <1 13 0xff08 0>,
++                     <1 14 0xff08 0>,
++                     <1 11 0xff08 0>,
++                     <1 10 0xff08 0>;
++        clock-frequency = <24576000>;
++    };
++
++    serial_0: uart@10870000 {
++        compatible = "samsung,exynos-uart";
++        reg = <0x0 0x10870000 0x100>;
++        interrupts = <0 0x281 4 0>;
++        reg-io-width = <4>;
++    };
++
++    memory@80000000 {
++        device_type = "memory";
++        reg = <0x0 0x80000000 0x35000000>;
++    };
++};
+diff --git a/tools/hardware.yml b/tools/hardware.yml
+index a2395ea2c..a589c1927 100644
+--- a/tools/hardware.yml
++++ b/tools/hardware.yml
+@@ -190,6 +190,7 @@ devices:
+       - nvidia,tegra20-uart
+       - qcom,msm-uartdm
+       - samsung,exynos4210-uart
++      - samsung,exynos-uart
+       - snps,dw-apb-uart
+       - st,stm32h7-uart
+       - ti,omap3-uart
+-- 
+2.53.0
+

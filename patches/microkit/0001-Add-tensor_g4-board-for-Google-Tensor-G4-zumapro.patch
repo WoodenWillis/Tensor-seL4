@@ -1,0 +1,102 @@
+From c0fe444597e778cae032b6168c398243d0949de6 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 01:06:09 -0400
+Subject: [PATCH] Add tensor_g4 board for Google Tensor G4 (zumapro)
+
+Register a Microkit board for the Tensor G4 platform in our seL4 fork,
+so an SDK can be built for the Pixel 9 Pro (caiman).
+
+The loader UART is the debug UART at 0x10870000. Its transmit-ready
+check follows the vendor exynos_tty console path for build
+BP1A.250505.005: in FIFO mode wait for UFSTAT TX-full to clear,
+otherwise wait for UTRSTAT TX-empty. ABL leaves the UART configured,
+so uart_init() does nothing.
+
+The loader relocates itself on entry, so its link address only has to
+be free RAM. 0xa0000000 is inside the largest carveout-free region of
+the kernel's RAM window and well clear of where ABL placed the Linux
+Image (0x80010000).
+
+The board is single-core for now. The redistributor stride has not
+been read from GICR_TYPER yet, and seL4 assumes 128 KiB per core.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ build_sdk.py      |  9 +++++++++
+ loader/src/uart.c | 25 +++++++++++++++++++++++++
+ platforms.yml     |  3 +++
+ 3 files changed, 37 insertions(+)
+
+diff --git a/build_sdk.py b/build_sdk.py
+index e6d3e38..86f8f15 100644
+--- a/build_sdk.py
++++ b/build_sdk.py
+@@ -409,6 +409,15 @@ SUPPORTED_BOARDS = (
+             "KernelPlatform": "rk3568",
+         },
+     ),
++    BoardInfo(
++        name="tensor_g4",
++        arch=KernelArch.AARCH64,
++        gcc_cpu="cortex-a55",
++        loader_link_address=0xa0000000,
++        kernel_options={
++            "KernelPlatform": "tensor-g4",
++        },
++    ),
+     BoardInfo(
+         name="hifive_p550",
+         arch=KernelArch.RISCV64,
+diff --git a/loader/src/uart.c b/loader/src/uart.c
+index 890d0b0..0834f1d 100644
+--- a/loader/src/uart.c
++++ b/loader/src/uart.c
+@@ -223,6 +223,31 @@ void putc(uint8_t ch)
+     while (!(*UART_REG(USART_ISR) & USART_ISR_TXE));
+     *UART_REG(USART_TDR) = ch;
+ }
++#elif defined(CONFIG_PLAT_TENSOR_G4)
++#define UART_BASE               0x10870000
++#define UFCON                   0x08
++#define UTRSTAT                 0x10
++#define UFSTAT                  0x18
++#define UTXH                    0x20
++#define UFCON_FIFOMODE          (1 << 0)
++#define UTRSTAT_TXE             (1 << 2)
++#define UFSTAT_TXFULL           (1 << 24)
++
++void uart_init(void) {}
++
++static int tx_ready(void)
++{
++    if (*UART_REG(UFCON) & UFCON_FIFOMODE) {
++        return !(*UART_REG(UFSTAT) & UFSTAT_TXFULL);
++    }
++    return *UART_REG(UTRSTAT) & UTRSTAT_TXE;
++}
++
++void putc(uint8_t ch)
++{
++    while (!tx_ready());
++    *UART_REG(UTXH) = ch;
++}
+ #elif defined(CONFIG_ARCH_RISCV64)
+ 
+ #include "riscv/sbi.h"
+diff --git a/platforms.yml b/platforms.yml
+index 1e4b812..7dc75e6 100644
+--- a/platforms.yml
++++ b/platforms.yml
+@@ -14,6 +14,9 @@
+ # This list is ordered based on the order in what the platforms were added
+ # in.
+ platforms:
++  - name: tensor_g4
++    cmake_plat: tensor-g4
++    since: dev
+   - name: rpi5b_2gb
+     cmake_plat: bcm2712
+     since: 2.3.1
+-- 
+2.53.0
+
