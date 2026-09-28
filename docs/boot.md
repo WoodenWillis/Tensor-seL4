@@ -2,9 +2,10 @@
 
 ## Handoff state
 
-| Property            | Value | Confirmed by                     |
-|---------------------|-------|----------------------------------|
-| Exception level     | EL2   | the maintainer's experience      |
+| Property            | Value        | Confirmed by                                                                |
+|---------------------|--------------|-----------------------------------------------------------------------------|
+| Exception level     | EL2          | the maintainer's experience                                                 |
+| Kernel load address | `0x80000000` | loader log `relocating from 0x0000000080001000` with payload at `+0x1000`, `fastboot boot`, BP1A.250505.005 |
 
 ## Booting a test image
 
