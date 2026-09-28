@@ -6,6 +6,8 @@
 |---------------------|--------------|-----------------------------------------------------------------------------|
 | Exception level     | EL2          | the maintainer's experience                                                 |
 | Kernel load address | `0x80000000` | loader log `relocating from 0x0000000080001000` with payload at `+0x1000`, `fastboot boot`, BP1A.250505.005 |
+| `watchdog_cl0` WTCON | `0x0001af39` | loader log before stop, `fastboot boot`, BP1A.250505.005 |
+| `watchdog_cl1` WTCON | `0x00018021` | loader log before stop, `fastboot boot`, BP1A.250505.005 |
 
 ## Building
 
