@@ -8,7 +8,7 @@ patches=$top/patches
 
 declare -A patched_head=(
     [microkit]=c0fe444597e778cae032b6168c398243d0949de6
-    [seL4]=86b848b14a2ce40fd89614d8f48f90156572ccc4
+    [seL4]=0b7cd9e3a19317907441cb31d2d453a9126c7145
 )
 
 die() {

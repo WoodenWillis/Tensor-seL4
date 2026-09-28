@@ -1,0 +1,32 @@
+From 0b7cd9e3a19317907441cb31d2d453a9126c7145 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 05:17:52 -0400
+Subject: [PATCH] tensor-g4: reserve pkvm_guest_firmware carveout
+
+The vendor DTB marks 0x8b000000+0xc0000 no-map and Linux on the device
+shows it as a top-level reserved range in /proc/iomem, but the overlay
+did not carve it out, so seL4 handed it to userspace as normal RAM.
+---
+ src/plat/tensor-g4/overlay-tensor-g4.dts | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/plat/tensor-g4/overlay-tensor-g4.dts b/src/plat/tensor-g4/overlay-tensor-g4.dts
+index b3ac6d9c2..f33b7f1f7 100644
+--- a/src/plat/tensor-g4/overlay-tensor-g4.dts
++++ b/src/plat/tensor-g4/overlay-tensor-g4.dts
+@@ -30,6 +30,12 @@
+         #size-cells = <1>;
+         ranges;
+ 
++        /* pkvm_guest_firmware */
++        pkvm_guest_firmware@8b000000 {
++            reg = <0x0 0x8b000000 0xc0000>;     /* 768 KB */
++            no-map;
++        };
++
+         /* ACPM */
+ 	ect_binary@90000000 {
+             reg = <0x0 0x90000000 0x60000>;     /* 384 KB */
+-- 
+2.53.0
+
