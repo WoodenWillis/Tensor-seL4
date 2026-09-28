@@ -1,0 +1,113 @@
+From 24ce355f25f77e96abe7288eaf7b5221227419e7 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 17:46:56 -0400
+Subject: [PATCH] loader: log tensor-g4 always-on S2MPU state at handoff
+
+pKVM never runs under seL4, so nothing has programmed the S2MPUs and
+they sit in whatever state ABL left them. Before we own them we need
+that state, and confirmation that the v9 register map from the
+pkvm-s2mpu-v9 driver matches this silicon.
+
+Read-only: VERSION, NUM_CONTEXT, CONTEXT_CFG_VALID_VID, CTRL0, STATUS,
+PROT_EN_PER_VID_SET, the VID 0 L1 entry for GB 2 (DRAM at 0x80000000)
+and FAULT_STATUS. Only the four always-on S2MPUs without a power
+domain (cpucl0, hsi1, hsi2, misc) are touched; the name is printed
+before each is read so a bus hang identifies the instance.
+---
+ loader/src/aarch64/init.c | 66 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 66 insertions(+)
+
+diff --git a/loader/src/aarch64/init.c b/loader/src/aarch64/init.c
+index 09b3644..933e42c 100644
+--- a/loader/src/aarch64/init.c
++++ b/loader/src/aarch64/init.c
+@@ -9,6 +9,7 @@
+ #include "../loader.h"
+ #include "../uart.h"
+ #include "../cpus.h"
++#include "../cutil.h"
+ #include "el.h"
+ #include "smc.h"
+ 
+@@ -116,6 +117,70 @@ static void stop_watchdogs(void)
+     watchdog_stop("watchdog_cl1", WATCHDOG_CL1_BASE);
+     watchdog_stop("watchdog_cl0", WATCHDOG_CL0_BASE);
+ }
++
++#define S2MPU_CTRL0                  0x0000
++#define S2MPU_PROT_EN_PER_VID_SET    0x0050
++#define S2MPU_VERSION                0x0060
++#define S2MPU_STATUS                 0x0068
++#define S2MPU_NUM_CONTEXT            0x0100
++#define S2MPU_CONTEXT_CFG_VALID_VID  0x0104
++#define S2MPU_FAULT_STATUS           0x2000
++#define S2MPU_L1ENTRY_L2TABLE_ADDR(vid, gb) (0x4000 + ((vid) * 0x200) + ((gb) * 0x8))
++#define S2MPU_L1ENTRY_ATTR(vid, gb)         (0x4004 + ((vid) * 0x200) + ((gb) * 0x8))
++
++struct s2mpu {
++    const char *name;
++    uintptr_t base;
++};
++
++static const struct s2mpu s2mpus_always_on[] = {
++    { "s2mpu_s0_cpucl0", 0x29c50000UL },
++    { "s2mpu_s0_hsi1",   0x12090000UL },
++    { "s2mpu_s0_hsi2",   0x131f0000UL },
++    { "s2mpu_s0_misc",   0x101f0000UL },
++};
++
++static uint32_t s2mpu_read(uintptr_t base, uintptr_t reg)
++{
++    return *((volatile uint32_t *)(base + reg));
++}
++
++static void s2mpu_log_reg(const struct s2mpu *s, const char *reg_name, uintptr_t reg)
++{
++    uint32_t val = s2mpu_read(s->base, reg);
++
++    puts("LDR|INFO: ");
++    puts(s->name);
++    puts(" ");
++    puts(reg_name);
++    puts(" ");
++    puthex32(val);
++    puts("\n");
++}
++
++static void s2mpu_probe(const struct s2mpu *s)
++{
++    puts("LDR|INFO: probing ");
++    puts(s->name);
++    puts("\n");
++
++    s2mpu_log_reg(s, "VERSION", S2MPU_VERSION);
++    s2mpu_log_reg(s, "NUM_CONTEXT", S2MPU_NUM_CONTEXT);
++    s2mpu_log_reg(s, "CONTEXT_CFG_VALID_VID", S2MPU_CONTEXT_CFG_VALID_VID);
++    s2mpu_log_reg(s, "CTRL0", S2MPU_CTRL0);
++    s2mpu_log_reg(s, "STATUS", S2MPU_STATUS);
++    s2mpu_log_reg(s, "PROT_EN_PER_VID_SET", S2MPU_PROT_EN_PER_VID_SET);
++    s2mpu_log_reg(s, "L1ENTRY_ATTR(0,2)", S2MPU_L1ENTRY_ATTR(0, 2));
++    s2mpu_log_reg(s, "L1ENTRY_L2TABLE_ADDR(0,2)", S2MPU_L1ENTRY_L2TABLE_ADDR(0, 2));
++    s2mpu_log_reg(s, "FAULT_STATUS", S2MPU_FAULT_STATUS);
++}
++
++static void probe_s2mpus(void)
++{
++    for (uint32_t i = 0; i < ARRAY_SIZE(s2mpus_always_on); i++) {
++        s2mpu_probe(&s2mpus_always_on[i]);
++    }
++}
+ #endif
+ 
+ void el1_mmu_disable(void);
+@@ -159,6 +224,7 @@ void arch_init(void)
+ 
+ #if defined(CONFIG_PLAT_TENSOR_G4)
+     stop_watchdogs();
++    probe_s2mpus();
+ #endif
+ 
+ #if !defined(ARM_PSCI_UNAVAILABLE)
+-- 
+2.53.0
+
