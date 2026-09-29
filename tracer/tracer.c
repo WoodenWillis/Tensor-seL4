@@ -6,14 +6,14 @@
 #include <microkit.h>
 
 #include <trace/console_ring.h>
-#include <trace/trace_v0.h>
+#include <trace/trace.h>
 
 #include "trace_stamp.h"
 
 #define PRODUCER_CH 1
 
 #define LINE_PREFIX_LEN 5
-#define LINE_MAX (LINE_PREFIX_LEN + 2 * TRACE_V0_HEADER_SIZE + 2)
+#define LINE_MAX (LINE_PREFIX_LEN + 2 * TRACE_HEADER_SIZE + 2)
 
 uintptr_t trace_ring_vaddr;
 uintptr_t console_ring_vaddr;
@@ -60,11 +60,11 @@ static void emit_line(const char prefix[LINE_PREFIX_LEN + 1], const void *data, 
 
 static void send_header(void)
 {
-    struct trace_header_v0 h;
+    struct trace_header h;
 
-    copy_field(h.magic, sizeof(h.magic), TRACE_V0_MAGIC);
-    h.version = TRACE_V0_VERSION;
-    h.record_size = TRACE_V0_RECORD_SIZE;
+    copy_field(h.magic, sizeof(h.magic), TRACE_MAGIC);
+    h.version = TRACE_VERSION;
+    h.record_size = TRACE_RECORD_SIZE;
     h.cntfrq = read_cntfrq();
     copy_field(h.codename, sizeof(h.codename), TRACE_STAMP_CODENAME);
     copy_field(h.build_id, sizeof(h.build_id), TRACE_STAMP_BUILD_ID);
@@ -73,7 +73,7 @@ static void send_header(void)
     copy_field(h.git_sha, sizeof(h.git_sha), TRACE_STAMP_GIT_SHA);
     copy_field(h.toolchain_sha256, sizeof(h.toolchain_sha256), TRACE_STAMP_TOOLCHAIN_SHA256);
     copy_field(h.dtb_sha256, sizeof(h.dtb_sha256), TRACE_STAMP_DTB_SHA256);
-    emit_line("TRH0 ", &h, sizeof(h));
+    emit_line("TRH1 ", &h, sizeof(h));
 }
 
 static void drain_console(void)
@@ -90,12 +90,12 @@ static void drain_console(void)
 
 static void drain_trace(void)
 {
-    struct trace_ring_v0 *ring = (struct trace_ring_v0 *)trace_ring_vaddr;
+    struct trace_ring *ring = (struct trace_ring *)trace_ring_vaddr;
     uint64_t tail = __atomic_load_n(&ring->tail, __ATOMIC_RELAXED);
 
     /* TODO(will): scrub per-device identifiers here before observing any driver that can see them */
     while (tail != __atomic_load_n(&ring->head, __ATOMIC_ACQUIRE)) {
-        emit_line("TRC0 ", &ring->records[tail % TRACE_V0_RING_CAPACITY], TRACE_V0_RECORD_SIZE);
+        emit_line("TRC1 ", &ring->records[tail % TRACE_RING_CAPACITY], TRACE_RECORD_SIZE);
         tail++;
         __atomic_store_n(&ring->tail, tail, __ATOMIC_RELEASE);
     }

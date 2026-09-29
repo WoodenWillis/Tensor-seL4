@@ -5,7 +5,7 @@
 #include "mmio_forward.h"
 #include "mmio_trace.h"
 
-#include <trace/trace_v0.h>
+#include <trace/trace.h>
 
 static bool forward_access_supported(const struct mmio_forward *fwd, size_t offset, size_t fsr)
 {

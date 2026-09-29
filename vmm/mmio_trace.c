@@ -8,7 +8,7 @@
 static void mmio_trace_emit(size_t vcpu_id, uintptr_t pc, uintptr_t addr, size_t fsr, uint8_t flags,
                             uint64_t value)
 {
-    struct trace_record_v0 rec = {
+    struct trace_record rec = {
         .pc = pc,
         .addr = addr,
         .value = value,

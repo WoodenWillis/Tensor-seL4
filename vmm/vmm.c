@@ -12,6 +12,7 @@
 #include "exynos_uart_emul.h"
 #include "mmio_forward.h"
 #include "mmio_trace.h"
+#include "smc_policy.h"
 #include "trace_producer.h"
 #include "channels.h"
 
@@ -100,21 +101,32 @@ static struct vm_fault vm_fault_save(microkit_msginfo msginfo)
     return f;
 }
 
-static void guest_stop_unhandled(microkit_child child, const struct vm_fault *f)
+static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo)
 {
-    if (f->is_vm_fault) {
-        mmio_trace_unhandled(child, f->pc, f->addr, f->fsr);
+    struct vm_fault f = vm_fault_save(msginfo);
+
+    if (fault_handle(child, msginfo)) {
+        return true;
     }
-    microkit_vcpu_stop(child);
-    LOG_VMM_ERR("guest stopped: fault not handled\n");
+    if (f.is_vm_fault) {
+        mmio_trace_unhandled(child, f.pc, f.addr, f.fsr);
+    }
+    return false;
 }
 
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
-    struct vm_fault f = vm_fault_save(msginfo);
+    uint64_t hsr;
+    bool handled;
 
-    if (!fault_handle(child, msginfo)) {
-        guest_stop_unhandled(child, &f);
+    if (smc_fault_hsr(msginfo, &hsr)) {
+        handled = smc_policy_handle(child, hsr);
+    } else {
+        handled = guest_fault_handle(child, msginfo);
+    }
+    if (!handled) {
+        microkit_vcpu_stop(child);
+        LOG_VMM_ERR("guest stopped: fault not handled\n");
         return seL4_False;
     }
     *reply_msginfo = microkit_msginfo_new(0, 0);
