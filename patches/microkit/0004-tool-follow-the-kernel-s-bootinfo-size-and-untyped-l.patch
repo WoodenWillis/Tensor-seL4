@@ -1,0 +1,122 @@
+From 761f2be586d2661f88ef76af55ae1a82630e68ae Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 20:40:24 -0400
+Subject: [PATCH 4/5] tool: follow the kernel's bootinfo size and untyped limit
+
+Kernel boot emulation assumed a one-page bootinfo frame and never
+applied MAX_NUM_BOOTINFO_UNTYPED_CAPS, so when the kernel ran out of
+bootinfo untyped slots the tool still planned against untypeds the
+kernel had dropped. Read BOOT_INFO_FRAME_BITS from the kernel config,
+use it for the initial task's virtual region, the root server size and
+its alignment, and fail the build if the emulated boot creates more
+untypeds than bootinfo can describe.
+
+tensor_g4 uses an 8 KiB bootinfo with room for 480 untypeds: its 29
+kernel-owned S2MPU blocks fragment device space past the one-page
+limit of about 240.
+---
+ build_sdk.py                |  2 ++
+ tool/microkit/src/sel4.rs   | 18 +++++++++++++++---
+ tool/microkit/tests/test.rs |  2 ++
+ 3 files changed, 19 insertions(+), 3 deletions(-)
+
+diff --git a/build_sdk.py b/build_sdk.py
+index 86f8f15..1578b88 100644
+--- a/build_sdk.py
++++ b/build_sdk.py
+@@ -416,6 +416,8 @@ SUPPORTED_BOARDS = (
+         loader_link_address=0xa0000000,
+         kernel_options={
+             "KernelPlatform": "tensor-g4",
++            "KernelBootInfoFrameBits": 13,
++            "KernelMaxNumBootinfoUntypedCaps": 480,
+         },
+     ),
+     BoardInfo(
+diff --git a/tool/microkit/src/sel4.rs b/tool/microkit/src/sel4.rs
+index bf9b3d0..9f1573e 100644
+--- a/tool/microkit/src/sel4.rs
++++ b/tool/microkit/src/sel4.rs
+@@ -197,7 +197,8 @@ fn calculate_rootserver_size(config: &Config, initial_task_region: MemoryRegion)
+     let mut size = 0;
+     size += 1 << (root_cnode_bits + slot_bits);
+     size += 1 << (tcb_bits);
+-    size += 2 * (1 << page_bits);
++    size += 1 << page_bits;
++    size += 1 << config.boot_info_frame_bits;
+     size += 1 << asid_pool_bits;
+     size += 1 << vspace_bits;
+     size += get_arch_n_paging(config, initial_task_region) * (1 << page_table_bits);
+@@ -211,7 +212,7 @@ fn rootserver_max_size_bits(config: &Config) -> u64 {
+     let vspace_bits = ObjectType::VSpace.fixed_size_bits(config).unwrap();
+ 
+     let cnode_size_bits = root_cnode_bits + slot_bits;
+-    max(cnode_size_bits, vspace_bits)
++    max(max(cnode_size_bits, vspace_bits), config.boot_info_frame_bits)
+ }
+ 
+ /// Emulate what happens during a kernel boot, generating a
+@@ -233,7 +234,7 @@ pub fn emulate_kernel_boot(
+     let mut initial_task_virt_region = user_image_virt_region;
+     // Refer to `try_init_kernel()` of src/arch/[arm,riscv]/kernel/boot.c
+     let ipc_size = PageSize::Small as u64; // seL4_PageBits
+-    let bootinfo_size = PageSize::Small as u64; // seL4_BootInfoFrameBits
++    let bootinfo_size = 1 << config.boot_info_frame_bits;
+     initial_task_virt_region.end += ipc_size;
+     initial_task_virt_region.end += bootinfo_size;
+ 
+@@ -293,6 +294,15 @@ pub fn emulate_kernel_boot(
+         untyped_objects.push(UntypedObject::new(cap, *r, false));
+     }
+ 
++    if untyped_objects.len() as u64 > config.max_num_bootinfo_untypeds {
++        eprintln!(
++            "ERROR: kernel boot would create {} untypeds but bootinfo holds only {} (MAX_NUM_BOOTINFO_UNTYPED_CAPS)",
++            untyped_objects.len(),
++            config.max_num_bootinfo_untypeds
++        );
++        std::process::exit(1);
++    }
++
+     let first_available_cap =
+         first_untyped_cap + device_regions.len() as u64 + normal_regions.len() as u64;
+     BootInfo {
+@@ -360,6 +370,7 @@ pub struct Config {
+     pub cap_address_bits: u64,
+     pub fan_out_limit: u64,
+     pub max_num_bootinfo_untypeds: u64,
++    pub boot_info_frame_bits: u64,
+     pub iommu: bool,
+     pub hypervisor: bool,
+     pub benchmark: bool,
+@@ -503,6 +514,7 @@ impl Config {
+                 &kernel_config_json,
+                 "MAX_NUM_BOOTINFO_UNTYPED_CAPS",
+             )?,
++            boot_info_frame_bits: json_str_as_u64(&kernel_config_json, "BOOT_INFO_FRAME_BITS")?,
+             hypervisor,
+             iommu,
+             benchmark: args.config == "benchmark",
+diff --git a/tool/microkit/tests/test.rs b/tool/microkit/tests/test.rs
+index d9f5a6a..d7c5beb 100644
+--- a/tool/microkit/tests/test.rs
++++ b/tool/microkit/tests/test.rs
+@@ -35,6 +35,7 @@ const DEFAULT_AARCH64_KERNEL_CONFIG: sel4::Config = sel4::Config {
+     init_cnode_bits: 12,
+     cap_address_bits: 64,
+     max_num_bootinfo_untypeds: 230,
++    boot_info_frame_bits: 12,
+     fan_out_limit: 256,
+     hypervisor: true,
+     iommu: true,
+@@ -73,6 +74,7 @@ const DEFAULT_X86_64_KERNEL_CONFIG: sel4::Config = sel4::Config {
+     init_cnode_bits: 12,
+     cap_address_bits: 64,
+     max_num_bootinfo_untypeds: 230,
++    boot_info_frame_bits: 12,
+     fan_out_limit: 256,
+     hypervisor: true,
+     iommu: true,
+-- 
+2.53.0
+

@@ -9,4 +9,5 @@
   <project name="seL4"     path="seL4"     remote="woodenwillis" upstream="master" revision="6e7c3b733d296cfd88d5fbf635c96e447a882374"/>
   <project name="libvmm"   path="libvmm"   remote="au-ts" revision="d2e37165285a28c7eae95501594d0807ea482c9c"/>
   <project name="sddf"     path="sddf"     remote="au-ts" revision="1fb88897e84f3634e701c6e4a9fc9fe689ac7fbd"/>
+  <project name="rust-sel4" path="rust-sel4" remote="seL4" revision="dbe6445d56059ed9a757e53c7137892aece1d179"/>
 </manifest>

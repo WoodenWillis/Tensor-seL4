@@ -7,8 +7,9 @@ deps=$top/deps
 patches=$top/patches
 
 declare -A patched_head=(
-    [microkit]=24ce355f25f77e96abe7288eaf7b5221227419e7
-    [seL4]=0b7cd9e3a19317907441cb31d2d453a9126c7145
+    [microkit]=146330229413048ac38170620b9e81a30a60594b
+    [rust-sel4]=49fb1e9d35b9f04a71201383e6839c166c36c501
+    [seL4]=c867f3a2734382460a78292251497f001d803de8
 )
 
 die() {

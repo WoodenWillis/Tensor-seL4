@@ -1,0 +1,281 @@
+From 617b40ddc9f5ed6e9142ce172232b80b7a10f6e0 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 18:21:58 -0400
+Subject: [PATCH 4/4] tensor-g4: describe the S2MPUs as kernel devices
+
+Add the 29 google,s2mpu-v9 nodes from the caiman vendor DTB
+(BP1A.250505.005; reg, interrupts, and the always-on / deny-all /
+off-at-boot flags) and list them all in seL4,kernel-devices, so the
+kernel owns every S2MPU and no userspace component can be given one.
+
+Each instance maps 0x5000, which covers every register the v9 driver
+uses (through L1ENTRY_ATTR(7,63) at 0x4ffc); the kernel device window
+is a single 2 MiB page table and cannot hold 29 full 64 KiB blocks.
+The remaining 0xb000 of each block is reserved, not mapped.
+
+No code touches the S2MPUs yet.
+---
+ src/plat/tensor-g4/overlay-tensor-g4.dts |  31 +++-
+ tools/dts/tensor-g4.dts                  | 181 +++++++++++++++++++++++
+ tools/hardware.yml                       |  11 ++
+ 3 files changed, 222 insertions(+), 1 deletion(-)
+
+diff --git a/src/plat/tensor-g4/overlay-tensor-g4.dts b/src/plat/tensor-g4/overlay-tensor-g4.dts
+index f33b7f1f7..b12545e42 100644
+--- a/src/plat/tensor-g4/overlay-tensor-g4.dts
++++ b/src/plat/tensor-g4/overlay-tensor-g4.dts
+@@ -11,7 +11,36 @@
+         seL4,kernel-devices =
+             "serial0",
+             &{/interrupt-controller@10400000},
+-            &{/timer};
++            &{/timer},
++            &{/s2mpu_s0_aur@20a80000},
++            &{/s2mpu_s0_bw@1a670000},
++            &{/s2mpu_s0_cpucl0@29c50000},
++            &{/s2mpu_s0_dpuf0@19870000},
++            &{/s2mpu_s0_dpuf1@19c70000},
++            &{/s2mpu_s0_eh@16c70000},
++            &{/s2mpu_s0_g2d@1a8a0000},
++            &{/s2mpu_s0_g3d@1ee70000},
++            &{/s2mpu_s0_gdc@1d4f0000},
++            &{/s2mpu_s0_gse@1d8a0000},
++            &{/s2mpu_s0_hsi0@11070000},
++            &{/s2mpu_s0_hsi1@12090000},
++            &{/s2mpu_s0_hsi2@131f0000},
++            &{/s2mpu_s0_ispfe@1c140000},
++            &{/s2mpu_s1_ispfe@1c180000},
++            &{/s2mpu_s2_ispfe@1c1c0000},
++            &{/s2mpu_s0_mcsc@1d0d0000},
++            &{/s2mpu_s0_mfc@1a4a0000},
++            &{/s2mpu_s0_misc@101f0000},
++            &{/s2mpu_s0_rgbp@1c4d0000},
++            &{/s2mpu_s1_rgbp@1c510000},
++            &{/s2mpu_s0_tnr@1ccb0000},
++            &{/s2mpu_s1_tnr@1ccf0000},
++            &{/s2mpu_s2_tnr@1cd30000},
++            &{/s2mpu_s0_tpu@1a370000},
++            &{/s2mpu_s0_yuvp@1c8a0000},
++            &{/s2mpu_s0_gsa@16470000},
++            &{/s2mpu_s0_aoc@190c0000},
++            &{/s2mpu_s0_alive@155b0000};
+     };
+ 
+     memory@80000000 {
+diff --git a/tools/dts/tensor-g4.dts b/tools/dts/tensor-g4.dts
+index 3c75bde79..5873d7715 100644
+--- a/tools/dts/tensor-g4.dts
++++ b/tools/dts/tensor-g4.dts
+@@ -98,6 +98,187 @@
+         reg-io-width = <4>;
+     };
+ 
++    s2mpu_s0_aur@20a80000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x20a80000 0x10000>;
++        interrupts = <0x00 0x9e 0x04 0x00>;
++    };
++
++    s2mpu_s0_bw@1a670000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1a670000 0x10000>;
++        interrupts = <0x00 0xa8 0x04 0x00>;
++    };
++
++    s2mpu_s0_cpucl0@29c50000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x29c50000 0x10000>;
++        interrupts = <0x00 0xed 0x04 0x00>;
++        always-on;
++    };
++
++    s2mpu_s0_dpuf0@19870000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x19870000 0x10000>;
++        interrupts = <0x00 0x117 0x04 0x00>;
++    };
++
++    s2mpu_s0_dpuf1@19c70000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x19c70000 0x10000>;
++        interrupts = <0x00 0x132 0x04 0x00>;
++    };
++
++    s2mpu_s0_eh@16c70000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x16c70000 0x10000>;
++        interrupts = <0x00 0x14d 0x04 0x00>;
++    };
++
++    s2mpu_s0_g2d@1a8a0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1a8a0000 0x10000>;
++        interrupts = <0x00 0x158 0x04 0x00>;
++    };
++
++    s2mpu_s0_g3d@1ee70000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1ee70000 0x10000>;
++        interrupts = <0x00 0x162 0x04 0x00>;
++    };
++
++    s2mpu_s0_gdc@1d4f0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1d4f0000 0x10000>;
++        interrupts = <0x00 0x175 0x04 0x00>;
++    };
++
++    s2mpu_s0_gse@1d8a0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1d8a0000 0x10000>;
++        interrupts = <0x00 0x183 0x04 0x00>;
++    };
++
++    s2mpu_s0_hsi0@11070000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x11070000 0x10000>;
++        interrupts = <0x00 0x18b 0x04 0x00>;
++    };
++
++    s2mpu_s0_hsi1@12090000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x12090000 0x10000>;
++        interrupts = <0x00 0x1aa 0x04 0x00>;
++        always-on;
++    };
++
++    s2mpu_s0_hsi2@131f0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x131f0000 0x10000>;
++        interrupts = <0x00 0x1cc 0x04 0x00>;
++        always-on;
++    };
++
++    s2mpu_s0_ispfe@1c140000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1c140000 0x10000>;
++        interrupts = <0x00 0x1ea 0x04 0x00>;
++    };
++
++    s2mpu_s1_ispfe@1c180000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1c180000 0x10000>;
++        interrupts = <0x00 0x1ee 0x04 0x00>;
++    };
++
++    s2mpu_s2_ispfe@1c1c0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1c1c0000 0x10000>;
++        interrupts = <0x00 0x1f2 0x04 0x00>;
++    };
++
++    s2mpu_s0_mcsc@1d0d0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1d0d0000 0x10000>;
++        interrupts = <0x00 0x201 0x04 0x00>;
++    };
++
++    s2mpu_s0_mfc@1a4a0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1a4a0000 0x10000>;
++        interrupts = <0x00 0x208 0x04 0x00>;
++    };
++
++    s2mpu_s0_misc@101f0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x101f0000 0x10000>;
++        interrupts = <0x00 0x341 0x04 0x00>;
++        always-on;
++    };
++
++    s2mpu_s0_rgbp@1c4d0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1c4d0000 0x10000>;
++        interrupts = <0x00 0x2a5 0x04 0x00>;
++    };
++
++    s2mpu_s1_rgbp@1c510000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1c510000 0x10000>;
++        interrupts = <0x00 0x2a9 0x04 0x00>;
++    };
++
++    s2mpu_s0_tnr@1ccb0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1ccb0000 0x10000>;
++        interrupts = <0x00 0x2ad 0x04 0x00>;
++    };
++
++    s2mpu_s1_tnr@1ccf0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1ccf0000 0x10000>;
++        interrupts = <0x00 0x2b1 0x04 0x00>;
++    };
++
++    s2mpu_s2_tnr@1cd30000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1cd30000 0x10000>;
++        interrupts = <0x00 0x2b5 0x04 0x00>;
++    };
++
++    s2mpu_s0_tpu@1a370000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1a370000 0x10000>;
++        interrupts = <0x00 0x2df 0x04 0x00>;
++    };
++
++    s2mpu_s0_yuvp@1c8a0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x1c8a0000 0x10000>;
++        interrupts = <0x00 0x2e6 0x04 0x00>;
++    };
++
++    s2mpu_s0_gsa@16470000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x16470000 0x10000>;
++        interrupts = <0x00 0x17b 0x04 0x00>;
++    };
++
++    s2mpu_s0_aoc@190c0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x190c0000 0x10000>;
++        interrupts = <0x00 0x86 0x04 0x00>;
++        deny-all;
++    };
++
++    s2mpu_s0_alive@155b0000 {
++        compatible = "google,s2mpu-v9";
++        reg = <0x00 0x155b0000 0x10000>;
++        interrupts = <0x00 0x75 0x04 0x00>;
++        off-at-boot;
++        deny-all;
++    };
++
+     memory@80000000 {
+         device_type = "memory";
+         reg = <0x0 0x80000000 0x35000000>;
+diff --git a/tools/hardware.yml b/tools/hardware.yml
+index a589c1927..2f5a1fbef 100644
+--- a/tools/hardware.yml
++++ b/tools/hardware.yml
+@@ -118,6 +118,17 @@ devices:
+         macro: CONFIG_TK1_SMMU
+     interrupts:
+       INTERRUPT_SMMU: 0
++  # Google S2MPU v9 (pkvm-s2mpu/common/kvm_s2mpu.h)
++  - compatible:
++      - google,s2mpu-v9
++    per_instance: true
++    regions:
++      - index: 0
++        kernel: PPTR
++        kernel_size: 0x5000
++        reserve_size: 0x10000
++    interrupts:
++      INTERRUPT: 0
+   # ARM architected timer (timer/arm,arch_timer.txt)
+   - compatible:
+       - arm,armv7-timer
+-- 
+2.53.0
+

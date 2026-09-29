@@ -1,0 +1,39 @@
+From 49fb1e9d35b9f04a71201383e6839c166c36c501 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 20:39:47 -0400
+Subject: [PATCH] sel4: locate extra bootinfo after the configured bootinfo
+ size
+
+The kernel places the extra bootinfo chunks at
+bi_frame_vptr + BIT(seL4_BootInfoFrameBits). With a kernel built with
+KernelBootInfoFrameBits above seL4_PageBits, assuming one granule put
+the extra region inside the untyped list.
+---
+ crates/sel4/src/bootinfo.rs | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/crates/sel4/src/bootinfo.rs b/crates/sel4/src/bootinfo.rs
+index e677040a..10ec1a4d 100644
+--- a/crates/sel4/src/bootinfo.rs
++++ b/crates/sel4/src/bootinfo.rs
+@@ -11,7 +11,7 @@ use core::mem;
+ use core::ops::{Deref, Range};
+ use core::slice;
+ 
+-use sel4_config::sel4_cfg;
++use sel4_config::{sel4_cfg, sel4_cfg_usize};
+ 
+ use crate::{FrameObjectType, IpcBuffer, cap_type, init_thread::SlotRegion, newtype_methods, sys};
+ 
+@@ -57,7 +57,7 @@ impl BootInfoPtr {
+         Self::EXTRA_OFFSET + self.extra_len()
+     }
+ 
+-    const EXTRA_OFFSET: usize = FrameObjectType::GRANULE.bytes();
++    const EXTRA_OFFSET: usize = 1 << sel4_cfg_usize!(BOOT_INFO_FRAME_BITS);
+ }
+ 
+ impl Deref for BootInfoPtr {
+-- 
+2.53.0
+

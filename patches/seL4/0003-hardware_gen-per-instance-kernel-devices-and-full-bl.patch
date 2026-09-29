@@ -1,0 +1,250 @@
+From 8bbbf09db9ec5e6d10d3f4e8105dd8ab529d166a Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 18:21:57 -0400
+Subject: [PATCH 3/4] hardware_gen: per-instance kernel devices and full-block
+ reservation
+
+A rule can now be shared by several kernel devices: with per_instance,
+each region label is prefixed and each interrupt label suffixed with
+the node name, so N instances of one compatible get N distinct macros
+instead of colliding on one.
+
+A region can also set reserve_size larger than kernel_size. Only
+kernel_size is mapped into the kernel device window, but the whole
+reserve_size is kept out of userspace: the tail is emitted as
+kernel_reserved_regions[], reserved at boot, and excluded from the
+device regions in the JSON/YAML outputs. Without this, the unmapped
+tail of a kernel-owned block would become device untyped.
+
+map_kernel_devices() now fails instead of ignoring a reserve_region()
+failure, which would otherwise leave a kernel device frame available
+to userspace.
+---
+ include/arch/arm/arch/bootinfo.h   |  2 +-
+ src/arch/arm/machine/hardware.c    | 13 +++++++++++--
+ tools/hardware/outputs/c_header.py | 24 ++++++++++++++++++++++++
+ tools/hardware/utils/memory.py     |  6 ++++++
+ tools/hardware/utils/rule.py       | 23 ++++++++++++++++++++---
+ tools/hardware_schema.yml          | 11 +++++++++++
+ 6 files changed, 73 insertions(+), 6 deletions(-)
+
+diff --git a/include/arch/arm/arch/bootinfo.h b/include/arch/arm/arch/bootinfo.h
+index fccc00378..1ee3243f5 100644
+--- a/include/arch/arm/arch/bootinfo.h
++++ b/include/arch/arm/arch/bootinfo.h
+@@ -33,4 +33,4 @@
+  * +1 for each region reserved by the boot code (NUM_RESERVED_REGIONS)
+  */
+ #define MAX_NUM_RESV_REG (MAX_NUM_FREEMEM_REG + NUM_KERNEL_DEVICE_FRAMES + \
+-                          NUM_RESERVED_REGIONS)
++                          NUM_KERNEL_RESERVED_REGIONS + NUM_RESERVED_REGIONS)
+diff --git a/src/arch/arm/machine/hardware.c b/src/arch/arm/machine/hardware.c
+index 427ec4485..4e15a3b41 100644
+--- a/src/arch/arm/machine/hardware.c
++++ b/src/arch/arm/machine/hardware.c
+@@ -35,10 +35,19 @@ BOOT_CODE void map_kernel_devices(void)
+                          vm_attributes_new(frame->armExecuteNever, false,
+                                            false));
+         if (!frame->userAvailable) {
+-            reserve_region((p_region_t) {
++            p_region_t reg = {
+                 .start = frame->paddr,
+                 .end   = frame->paddr + BIT(PAGE_BITS)
+-            });
++            };
++            if (!reserve_region(reg)) {
++                fail("could not reserve kernel device frame");
++            }
++        }
++    }
++
++    for (int i = 0; i < NUM_KERNEL_RESERVED_REGIONS; i++) {
++        if (!reserve_region(kernel_reserved_regions[i])) {
++            fail("could not reserve kernel device region");
+         }
+     }
+ }
+diff --git a/tools/hardware/outputs/c_header.py b/tools/hardware/outputs/c_header.py
+index a968c95a3..ace9b8754 100644
+--- a/tools/hardware/outputs/c_header.py
++++ b/tools/hardware/outputs/c_header.py
+@@ -115,6 +115,29 @@ static const kernel_frame_t BOOT_RODATA *const kernel_device_frames = NULL;
+ #define NUM_KERNEL_DEVICE_FRAMES 0
+ {% endif %}
+ 
++{% if len(kernel_reserved) > 0 %}
++static const p_region_t BOOT_RODATA kernel_reserved_regions[] = {
++    {% for group in kernel_reserved %}
++    {% if group.has_macro() %}
++    {{ group.get_macro() }}
++    {% endif %}
++    /* {{ group.get_desc() }} */
++    {
++        .start = {{ "0x{:x}".format(group.reserved_tail.base) }},
++        .end   = {{ "0x{:x}".format(group.reserved_tail.base + group.reserved_tail.size) }}
++    },
++    {% if group.has_macro() %}
++    {{ group.get_endif() }}
++    {% endif %}
++    {% endfor %}
++};
++
++#define NUM_KERNEL_RESERVED_REGIONS ARRAY_SIZE(kernel_reserved_regions)
++{% else %}
++static const p_region_t BOOT_RODATA *const kernel_reserved_regions = NULL;
++#define NUM_KERNEL_RESERVED_REGIONS 0
++{% endif %}
++
+ /* PHYSICAL MEMORY */
+ static const p_region_t BOOT_RODATA avail_p_regs[] = {
+     {% for reg in physical_memory %}
+@@ -200,6 +223,7 @@ def create_c_header_file(config, kernel_irqs: List, kernel_macros: Dict,
+             'kernel_irqs': kernel_irqs,
+             'kernel_macros': kernel_macros,
+             'kernel_regions': kernel_regions,
++            'kernel_reserved': [group for group in kernel_regions if group.reserved_tail is not None],
+             'physBase': physBase,
+             'physical_memory': physical_memory})
+     data = template.render(template_args)
+diff --git a/tools/hardware/utils/memory.py b/tools/hardware/utils/memory.py
+index 45a392f7b..fcd0136c5 100644
+--- a/tools/hardware/utils/memory.py
++++ b/tools/hardware/utils/memory.py
+@@ -113,10 +113,16 @@ def get_addrspace_exclude(regions: List[Region], config: Config):
+     ret = set()
+     ret.add(Region(0, config.addrspace_max))
+ 
++    excluded = []
+     for reg in regions:
+         if type(reg) == KernelRegionGroup:
+             if reg.user_ok:
+                 continue
++            if reg.reserved_tail is not None:
++                excluded.append(reg.reserved_tail)
++        excluded.append(reg)
++
++    for reg in excluded:
+         new_ret = set()
+         for el in ret:
+             new_ret.update(el.reserve(reg))
+diff --git a/tools/hardware/utils/rule.py b/tools/hardware/utils/rule.py
+index 829272d54..9d05b6def 100644
+--- a/tools/hardware/utils/rule.py
++++ b/tools/hardware/utils/rule.py
+@@ -14,6 +14,7 @@ from hardware.config import Config
+ from hardware.device import WrappedNode
+ from hardware.fdt import FdtParser
+ from hardware.memory import Region
++from hardware.utils import align_up
+ 
+ 
+ def get_macro_str(macro: str) -> str:
+@@ -37,7 +38,7 @@ def get_endif(macro: str) -> str:
+ class KernelRegionGroup:
+     ''' wraps a contiguous region of memory that is mapped into the kernel. '''
+ 
+-    def __init__(self, region: Region, kernel_name: str, page_bits: int, max_size: int, condition_macro: str = None, user_ok: bool = False):
++    def __init__(self, region: Region, kernel_name: str, page_bits: int, max_size: int, condition_macro: str = None, user_ok: bool = False, reserve_size: int = 0):
+         self.macro = condition_macro
+         self.desc = region.owner.path if region.owner else 'dynamically generated region'
+         self.kernel_offset = -1
+@@ -45,6 +46,7 @@ class KernelRegionGroup:
+         self.labels = {}  # dict of label => offset within region.
+         self.user_ok = user_ok
+ 
++        reserve_end = align_up(region.base + reserve_size, page_bits)
+         region.size = min(max_size, region.size)
+         aligned = region.align_size(page_bits)
+         self.size = aligned.size
+@@ -52,6 +54,10 @@ class KernelRegionGroup:
+         self.regions = aligned.make_chunks(1 << page_bits)
+         self.labels[kernel_name] = region.base - aligned.base
+ 
++        self.reserved_tail = None
++        if reserve_end > self.base + self.size:
++            self.reserved_tail = Region.from_range(self.base + self.size, reserve_end, region.owner)
++
+     def has_macro(self):
+         ''' True if this group has a macro '''
+         return self.macro is not None
+@@ -149,10 +155,18 @@ class DeviceRule:
+         self.regions: Dict[int, Dict] = {}
+         self.interrupts = rule.get('interrupts', {})
+         self.config = config
++        self.per_instance = rule.get('per_instance', False)
+ 
+         for reg in rule.get('regions', []):
+             self.regions[reg['index']] = reg
+ 
++    def instance_label(self, node: WrappedNode, label: str, prefix: bool) -> str:
++        if not self.per_instance:
++            return label
++        name = node.path.split('/')[-1].split('@')[0].upper()
++        name = ''.join(c if c.isalnum() else '_' for c in name)
++        return '{}_{}'.format(name, label) if prefix else '{}_{}'.format(label, name)
++
+     @lru_cache()
+     def get_regions(self, node: WrappedNode) -> List[KernelRegionGroup]:
+         ''' Returns a list of KernelRegionGroups that this rule specifies should be mapped into the kernel for this device. '''
+@@ -165,9 +179,10 @@ class DeviceRule:
+                 continue
+             reg = regions[i]
+ 
+-            kernel_name = rule['kernel']
++            kernel_name = self.instance_label(node, rule['kernel'], prefix=True)
+             user = rule.get('user', False)
+             macro = rule.get('macro', None)
++            reserve_size = rule.get('reserve_size', 0)
+             max_size = 1 << self.config.get_device_page_bits()
+             if 'kernel_size' in rule:
+                 max_size = rule['kernel_size']
+@@ -175,7 +190,8 @@ class DeviceRule:
+                 logging.warning(
+                     "Only mapping {}/{} bytes from node {}, region {}. Set kernel_size in YAML to silence.".format(max_size, reg.size, node.path, i))
+             ret.append(KernelRegionGroup(reg, kernel_name,
+-                                         self.config.get_device_page_bits(), max_size, macro, user))
++                                         self.config.get_device_page_bits(), max_size, macro, user,
++                                         reserve_size))
+ 
+         return ret
+ 
+@@ -186,6 +202,7 @@ class DeviceRule:
+         interrupts = node.get_interrupts(tree)
+ 
+         for name, rule in self.interrupts.items():
++            name = self.instance_label(node, name, prefix=False)
+             irq_desc = '{} generated from {}'.format(name, node.path)
+             if type(rule) == dict:
+                 en_macro = rule.get('enable_macro', None)
+diff --git a/tools/hardware_schema.yml b/tools/hardware_schema.yml
+index 23e4bba5d..6b3bc1283 100644
+--- a/tools/hardware_schema.yml
++++ b/tools/hardware_schema.yml
+@@ -27,6 +27,12 @@ definitions:
+         type: array
+         minItems: 1
+         uniqueItems: true
++      per_instance:
++        description: >
++          Prefix every kernel region and interrupt label with the node name,
++          so several kernel devices can share one rule.
++        default: false
++        type: boolean
+       regions:
+         description: Memory regions this device has that the kernel might use
+         type: array
+@@ -69,6 +75,11 @@ definitions:
+           If false, region will only be exposed if kernel is not using it.
+         default: false
+         type: boolean
++      reserve_size:
++        description: >
++          Keep PAGE_ALIGN_UP(reserve_size) bytes from the device's base address
++          out of userspace, even where kernel_size maps less than that.
++        type: integer
+     required: [index, kernel]
+   interrupt:
+     oneOf:
+-- 
+2.53.0
+

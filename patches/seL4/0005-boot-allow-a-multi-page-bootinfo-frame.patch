@@ -1,0 +1,246 @@
+From c867f3a2734382460a78292251497f001d803de8 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 20:36:48 -0400
+Subject: [PATCH] boot: allow a multi-page bootinfo frame
+
+The untyped list lives in seL4_BootInfo, which had to fit one page, so
+CONFIG_MAX_NUM_BOOTINFO_UNTYPED_CAPS topped out near 240. A platform
+with many kernel-owned device blocks (tensor-g4 reserves 29 S2MPUs)
+fragments device space past that, and the kernel then dropped the
+remaining untypeds -- all normal memory, since those come last -- with
+only a printf.
+
+Add KernelBootInfoFrameBits (default 12, i.e. seL4_PageBits, so
+existing configurations are unchanged). A larger bootinfo is allocated
+in size order with the other root server objects, the first page keeps
+seL4_CapBootInfoFrame, and caps for the remaining pages go in a new
+seL4_BootInfo.bootInfoFrames slot region. They are provided after the
+MCS sched control caps so that slot layout up to that point does not
+move. Only aarch32/aarch64 map the extra pages; riscv and x86
+compile-assert a single page.
+
+Running out of bootinfo untyped slots is now a boot failure instead of
+a warning.
+---
+ config.cmake                          |  2 +
+ include/kernel/boot.h                 |  1 +
+ libsel4/include/sel4/bootinfo_types.h |  7 ++-
+ src/arch/arm/kernel/boot.c            |  5 +++
+ src/arch/riscv/kernel/boot.c          |  2 +
+ src/arch/x86/kernel/boot.c            |  2 +
+ src/kernel/boot.c                     | 62 +++++++++++++++++++++------
+ 7 files changed, 68 insertions(+), 13 deletions(-)
+
+diff --git a/config.cmake b/config.cmake
+index 750ab9b19..122e34b92 100644
+--- a/config.cmake
++++ b/config.cmake
+@@ -127,6 +127,8 @@ config_string(
+   UNQUOTE)
+ config_string(KernelMaxNumBootinfoUntypedCaps MAX_NUM_BOOTINFO_UNTYPED_CAPS
+               "Max number of bootinfo untyped caps" DEFAULT 230 UNQUOTE)
++config_string(KernelBootInfoFrameBits BOOT_INFO_FRAME_BITS
++              "Size of the bootinfo frame as a power of two, at least seL4_PageBits" DEFAULT 12 UNQUOTE)
+ config_option(KernelFastpath FASTPATH "Enable IPC fastpath" DEFAULT ON)
+ 
+ config_option(KernelExceptionFastpath EXCEPTION_FASTPATH "Enable exception fastpath" DEFAULT OFF
+diff --git a/include/kernel/boot.h b/include/kernel/boot.h
+index 511b3acd1..9969ab091 100644
+--- a/include/kernel/boot.h
++++ b/include/kernel/boot.h
+@@ -60,6 +60,7 @@ word_t calculate_extra_bi_size_bits(word_t extra_size);
+ void populate_bi_frame(node_id_t node_id, word_t num_nodes, vptr_t ipcbuf_vptr,
+                        word_t extra_bi_size);
+ void create_bi_frame_cap(cap_t root_cnode_cap, cap_t pd_cap, vptr_t vptr);
++bool_t create_bi_frame_tail_caps(cap_t root_cnode_cap, cap_t pd_cap, vptr_t vptr);
+ 
+ #ifdef CONFIG_KERNEL_MCS
+ bool_t init_sched_control(cap_t root_cnode_cap, word_t num_nodes);
+diff --git a/libsel4/include/sel4/bootinfo_types.h b/libsel4/include/sel4/bootinfo_types.h
+index 66c97aa51..e03ec39a8 100644
+--- a/libsel4/include/sel4/bootinfo_types.h
++++ b/libsel4/include/sel4/bootinfo_types.h
+@@ -66,6 +66,7 @@ typedef struct seL4_BootInfo {
+     seL4_SlotRegion   userImagePaging; /* userland-image paging structure caps */
+     seL4_SlotRegion   ioSpaceCaps;     /* IOSpace caps for ARM SMMU */
+     seL4_SlotRegion   extraBIPages;    /* caps for any pages used to back the additional bootinfo information */
++    seL4_SlotRegion   bootInfoFrames;
+     seL4_Word         initThreadCNodeSizeBits; /* initial thread's root CNode size (2^n slots) */
+     seL4_Domain       initThreadDomain; /* Initial thread's domain ID */
+ #ifdef CONFIG_KERNEL_MCS
+@@ -81,9 +82,13 @@ typedef struct seL4_BootInfo {
+  * structure. Due to internal restrictions, the size must be of the form 2^n and
+  * the minimum is one page.
+  */
+-#define seL4_BootInfoFrameBits  seL4_PageBits
++#define seL4_BootInfoFrameBits  CONFIG_BOOT_INFO_FRAME_BITS
+ #define seL4_BootInfoFrameSize  LIBSEL4_BIT(seL4_BootInfoFrameBits)
+ 
++SEL4_COMPILE_ASSERT(
++    invalid_seL4_BootInfoFrameBits,
++    seL4_BootInfoFrameBits >= seL4_PageBits)
++
+ SEL4_COMPILE_ASSERT(
+     invalid_seL4_BootInfoFrameSize,
+     sizeof(seL4_BootInfo) <= seL4_BootInfoFrameSize)
+diff --git a/src/arch/arm/kernel/boot.c b/src/arch/arm/kernel/boot.c
+index 139f620b3..0b09429e5 100644
+--- a/src/arch/arm/kernel/boot.c
++++ b/src/arch/arm/kernel/boot.c
+@@ -523,6 +523,11 @@ static BOOT_CODE bool_t try_init_kernel(
+     init_sched_control(root_cnode_cap, CONFIG_MAX_NUM_NODES);
+ #endif
+ 
++    if (!create_bi_frame_tail_caps(root_cnode_cap, it_pd_cap, bi_frame_vptr)) {
++        printf("ERROR: could not map boot info frames after the first\n");
++        return false;
++    }
++
+     /* create the initial thread's IPC buffer */
+     ipcbuf_cap = create_ipcbuf_frame_cap(root_cnode_cap, it_pd_cap, ipcbuf_vptr);
+     if (cap_get_capType(ipcbuf_cap) == cap_null_cap) {
+diff --git a/src/arch/riscv/kernel/boot.c b/src/arch/riscv/kernel/boot.c
+index a6dabe136..4a5f72232 100644
+--- a/src/arch/riscv/kernel/boot.c
++++ b/src/arch/riscv/kernel/boot.c
+@@ -190,6 +190,8 @@ BOOT_CODE static void release_secondary_cores(void)
+ 
+ /* Main kernel initialisation function. */
+ 
++compile_assert(riscv_boot_info_single_page, seL4_BootInfoFrameBits == seL4_PageBits)
++
+ static BOOT_CODE bool_t try_init_kernel(
+     paddr_t ui_p_reg_start,
+     paddr_t ui_p_reg_end,
+diff --git a/src/arch/x86/kernel/boot.c b/src/arch/x86/kernel/boot.c
+index 93b320964..7546e97b7 100644
+--- a/src/arch/x86/kernel/boot.c
++++ b/src/arch/x86/kernel/boot.c
+@@ -83,6 +83,8 @@ BOOT_CODE static bool_t arch_init_freemem(p_region_t ui_p_reg,
+ 
+ /* This function initialises a node's kernel state. It does NOT initialise the CPU. */
+ 
++compile_assert(x86_boot_info_single_page, seL4_BootInfoFrameBits == seL4_PageBits)
++
+ BOOT_CODE bool_t init_sys_state(
+     cpu_id_t      cpu_id,
+     mem_p_regs_t  *mem_p_regs,
+diff --git a/src/kernel/boot.c b/src/kernel/boot.c
+index 079edbed9..8bb98903e 100644
+--- a/src/kernel/boot.c
++++ b/src/kernel/boot.c
+@@ -169,6 +169,7 @@ BOOT_CODE static word_t rootserver_max_size_bits(word_t extra_bi_size_bits)
+ {
+     word_t cnode_size_bits = CONFIG_ROOT_CNODE_SIZE_BITS + seL4_SlotBits;
+     word_t max = MAX(cnode_size_bits, seL4_VSpaceBits);
++    max = MAX(max, seL4_BootInfoFrameBits);
+     return MAX(max, extra_bi_size_bits);
+ }
+ 
+@@ -196,6 +197,25 @@ BOOT_CODE static void maybe_alloc_extra_bi(word_t cmp_size_bits, word_t extra_bi
+     }
+ }
+ 
++BOOT_CODE static void maybe_alloc_multi_page_bi(word_t cmp_size_bits)
++{
++    if (seL4_BootInfoFrameBits > seL4_PageBits && seL4_BootInfoFrameBits >= cmp_size_bits &&
++        rootserver.boot_info == 0) {
++        rootserver.boot_info = alloc_rootserver_obj(seL4_BootInfoFrameBits, 1);
++    }
++}
++
++BOOT_CODE static void maybe_alloc_bi_objects(word_t cmp_size_bits, word_t extra_bi_size_bits)
++{
++    if (seL4_BootInfoFrameBits >= extra_bi_size_bits) {
++        maybe_alloc_multi_page_bi(cmp_size_bits);
++        maybe_alloc_extra_bi(cmp_size_bits, extra_bi_size_bits);
++    } else {
++        maybe_alloc_extra_bi(cmp_size_bits, extra_bi_size_bits);
++        maybe_alloc_multi_page_bi(cmp_size_bits);
++    }
++}
++
+ /* Create pptrs for all root server objects, starting at a give start address,
+  * to cover the virtual memory region v_reg, and any extra boot info.
+  */
+@@ -210,31 +230,28 @@ BOOT_CODE static void create_rootserver_objects(pptr_t start, v_region_t it_v_re
+     rootserver_mem.start = start;
+     rootserver_mem.end = start + size;
+ 
+-    maybe_alloc_extra_bi(max, extra_bi_size_bits);
++    maybe_alloc_bi_objects(max, extra_bi_size_bits);
+ 
+     /* the root cnode is at least 4k, so it could be larger or smaller than a pd. */
+ #if (CONFIG_ROOT_CNODE_SIZE_BITS + seL4_SlotBits) > seL4_VSpaceBits
+     rootserver.cnode = alloc_rootserver_obj(cnode_size_bits, 1);
+-    maybe_alloc_extra_bi(seL4_VSpaceBits, extra_bi_size_bits);
++    maybe_alloc_bi_objects(seL4_VSpaceBits, extra_bi_size_bits);
+     rootserver.vspace = alloc_rootserver_obj(seL4_VSpaceBits, 1);
+ #else
+     rootserver.vspace = alloc_rootserver_obj(seL4_VSpaceBits, 1);
+-    maybe_alloc_extra_bi(cnode_size_bits, extra_bi_size_bits);
++    maybe_alloc_bi_objects(cnode_size_bits, extra_bi_size_bits);
+     rootserver.cnode = alloc_rootserver_obj(cnode_size_bits, 1);
+ #endif
+ 
+     /* at this point we are up to creating 4k objects - which is the min size of
+      * extra_bi so this is the last chance to allocate it */
+-    maybe_alloc_extra_bi(seL4_PageBits, extra_bi_size_bits);
++    maybe_alloc_bi_objects(seL4_PageBits, extra_bi_size_bits);
+     compile_assert(invalid_seL4_ASIDPoolBits, seL4_ASIDPoolBits == seL4_PageBits);
+     rootserver.asid_pool = alloc_rootserver_obj(seL4_ASIDPoolBits, 1);
+     rootserver.ipc_buf = alloc_rootserver_obj(seL4_PageBits, 1);
+-    /* The boot info size must be at least one page. Due to the hard-coded order
+-     * of allocations used in the current implementation here, it can't be any
+-     * bigger.
+-     */
+-    compile_assert(invalid_seL4_BootInfoFrameBits, seL4_BootInfoFrameBits == seL4_PageBits);
+-    rootserver.boot_info = alloc_rootserver_obj(seL4_BootInfoFrameBits, 1);
++    if (rootserver.boot_info == 0) {
++        rootserver.boot_info = alloc_rootserver_obj(seL4_BootInfoFrameBits, 1);
++    }
+ 
+     /* TCBs on aarch32 can be larger than page tables in certain configs */
+ #if seL4_TCBBits >= seL4_PageTableBits
+@@ -321,6 +338,26 @@ BOOT_CODE void create_bi_frame_cap(cap_t root_cnode_cap, cap_t pd_cap, vptr_t vp
+     write_slot(SLOT_PTR(pptr_of_cap(root_cnode_cap), seL4_CapBootInfoFrame), cap);
+ }
+ 
++BOOT_CODE bool_t create_bi_frame_tail_caps(cap_t root_cnode_cap, cap_t pd_cap, vptr_t vptr)
++{
++    seL4_SlotPos slot_pos_before = ndks_boot.slot_pos_cur;
++
++    for (word_t offset = BIT(seL4_PageBits); offset < BIT(seL4_BootInfoFrameBits);
++         offset += BIT(seL4_PageBits)) {
++        cap_t cap = create_mapped_it_frame_cap(pd_cap, rootserver.boot_info + offset,
++                                               vptr + offset, IT_ASID, false, false);
++        if (!provide_cap(root_cnode_cap, cap)) {
++            return false;
++        }
++    }
++
++    ndks_boot.bi_frame->bootInfoFrames = (seL4_SlotRegion) {
++        .start = slot_pos_before,
++        .end   = ndks_boot.slot_pos_cur
++    };
++    return true;
++}
++
+ /**
+  * the size_bits we return is 0 for extra_size = 0
+  * and if it is non-zero the bits are always >= seL4_PageBits
+@@ -720,8 +757,9 @@ BOOT_CODE static bool_t provide_untyped_cap(
+                                      device_memory, size_bits, pptr);
+         ret = provide_cap(root_cnode_cap, ut_cap);
+     } else {
+-        printf("Kernel init: Too many untyped regions for boot info\n");
+-        ret = true;
++        printf("ERROR: too many untyped regions for boot info (max %u)\n",
++               (unsigned int)CONFIG_MAX_NUM_BOOTINFO_UNTYPED_CAPS);
++        ret = false;
+     }
+     return ret;
+ }
+-- 
+2.53.0
+
