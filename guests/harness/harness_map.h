@@ -10,4 +10,10 @@
 #define HARNESS_UART_SIZE           0x100
 
 /* watchdog_cl0 */
-#define HARNESS_UNKNOWN_DEVICE_GPA  0x10060000
+#define HARNESS_WATCHDOG_GPA        0x10060000
+#define HARNESS_WATCHDOG_SIZE       0x100
+/* WTCON */
+#define HARNESS_WATCHDOG_WTCON      0x00
+
+/* watchdog_cl1 */
+#define HARNESS_UNKNOWN_DEVICE_GPA  0x10070000

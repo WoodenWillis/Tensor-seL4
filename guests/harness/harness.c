@@ -32,9 +32,20 @@ static void uart_puts(const char *s)
     }
 }
 
+static void uart_puthex32(uint32_t val)
+{
+    uart_puts("0x");
+    for (int shift = 28; shift >= 0; shift -= 4) {
+        uart_putc("0123456789abcdef"[(val >> shift) & 0xf]);
+    }
+}
+
 void harness_main(void)
 {
     uart_puts("hello\n");
+    uart_puts("WTCON=");
+    uart_puthex32(mmio_read32(HARNESS_WATCHDOG_GPA + HARNESS_WATCHDOG_WTCON));
+    uart_puts("\n");
     (void)mmio_read32(HARNESS_UNKNOWN_DEVICE_GPA);
     uart_puts("resumed\n");
 }

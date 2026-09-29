@@ -10,12 +10,20 @@
 
 #include "harness_map.h"
 #include "exynos_uart_emul.h"
+#include "mmio_forward.h"
 #include "mmio_trace.h"
 
 extern char _guest_harness_image[];
 extern char _guest_harness_image_end[];
 
 uintptr_t guest_ram_vaddr;
+uintptr_t watchdog_cl0_vaddr;
+
+static struct mmio_forward watchdog_cl0 = {
+    .name = "watchdog_cl0",
+    .gpa = HARNESS_WATCHDOG_GPA,
+    .size = HARNESS_WATCHDOG_SIZE,
+};
 
 static bool harness_load(void)
 {
@@ -50,6 +58,11 @@ void init(void)
     }
     if (!exynos_uart_emul_init(HARNESS_UART_GPA, HARNESS_UART_SIZE, "harness")) {
         LOG_VMM_ERR("failed to register UART emulation\n");
+        return;
+    }
+    watchdog_cl0.vmm_vaddr = watchdog_cl0_vaddr;
+    if (!mmio_forward_read_only_init(&watchdog_cl0)) {
+        LOG_VMM_ERR("failed to register watchdog_cl0 forwarding\n");
         return;
     }
     if (!guest_start(HARNESS_RAM_GPA, 0, 0)) {

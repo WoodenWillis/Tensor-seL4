@@ -47,7 +47,7 @@ HARNESS_CFLAGS := \
 	-MD -MP \
 	$(ARCH_FLAGS)
 
-VMM_OBJS := vmm.o exynos_uart_emul.o mmio_trace.o images.o
+VMM_OBJS := vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o images.o
 
 LDFLAGS := -L$(BOARD_DIR)/lib
 LIBS := --start-group -lmicrokit -Tmicrokit.ld libvmm.a libsddf_util_debug.a --end-group
@@ -75,7 +75,7 @@ harness/harness.bin: harness/harness.elf
 harness:
 	mkdir -p $@
 
-vmm.o exynos_uart_emul.o mmio_trace.o: %.o: %.c
+vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o: %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 images.o: $(TOP)/vmm/images.S harness/harness.bin
