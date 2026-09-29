@@ -1,0 +1,50 @@
+From 21c5455eeb12cbcccdffa85d553065b2284f3f34 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 20:59:30 -0400
+Subject: [PATCH] Enable SMP on tensor_g4
+
+Build an smp configuration with all 8 cores and give the loader their
+PSCI CPU_ON targets. The targets are the reg values of the cpu@0 ..
+cpu@700 nodes in the caiman DTB (BP1A.250505.005), which also says
+enable-method = "psci" and PSCI method "smc".
+
+seL4's GICv3 driver needs no change. A read-only loader probe on
+caiman found GICD_PIDR2 0x3b (GICv3) and eight redistributors at the
+128 KiB stride seL4 assumes: GICR_TYPER affinity 0x000..0x700 at
+offsets 0x00000..0xe0000, VLPIS clear, Last set only on 0x700. The
+DTB's 2 MiB GICR region overstates it: something else answers at
++0x100000 and a read at +0x1c0000 (0x1060000c) takes a synchronous
+external abort.
+---
+ build_sdk.py              | 1 +
+ loader/src/aarch64/cpus.c | 2 ++
+ 2 files changed, 3 insertions(+)
+
+diff --git a/build_sdk.py b/build_sdk.py
+index 1578b88..2abb54e 100644
+--- a/build_sdk.py
++++ b/build_sdk.py
+@@ -414,6 +414,7 @@ SUPPORTED_BOARDS = (
+         arch=KernelArch.AARCH64,
+         gcc_cpu="cortex-a55",
+         loader_link_address=0xa0000000,
++        smp_cores=8,
+         kernel_options={
+             "KernelPlatform": "tensor-g4",
+             "KernelBootInfoFrameBits": 13,
+diff --git a/loader/src/aarch64/cpus.c b/loader/src/aarch64/cpus.c
+index 327ab9b..5647288 100644
+--- a/loader/src/aarch64/cpus.c
++++ b/loader/src/aarch64/cpus.c
+@@ -75,6 +75,8 @@ static const size_t psci_target_cpus[4] = {0x00, 0x01, 0x02, 0x03};
+ static const size_t cpus_release_addr[4] = {0xd8, 0xe0, 0xe8, 0xf0};
+ #elif defined(CONFIG_PLAT_BCM2712)
+ static const size_t psci_target_cpus[4] = {0x000, 0x100, 0x200, 0x300};
++#elif defined(CONFIG_PLAT_TENSOR_G4)
++static const size_t psci_target_cpus[8] = {0x000, 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700};
+ #else
+ 
+ _Static_assert(!is_set(CONFIG_ENABLE_SMP_SUPPORT),
+-- 
+2.53.0
+

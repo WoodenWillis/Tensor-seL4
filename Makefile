@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 BOARD := tensor_g4
-CONFIG := debug
+CONFIG := smp-debug
 
 BUILD := $(abspath build)
 MICROKIT := $(abspath deps/microkit)
