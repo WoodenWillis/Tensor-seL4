@@ -12,6 +12,8 @@ SDK_LOADER = $(SDK)/board/$(BOARD)/$(CONFIG)/elf/loader.elf
 DEPS_STAMP := $(BUILD)/deps.stamp
 HELLO := $(BUILD)/hello
 VMM := $(BUILD)/vmm
+DEVICE_TXT := hw/dts/caiman-BP1A.250505.005.txt
+DEVICE_DTB := hw/dts/caiman-BP1A.250505.005.dtb
 
 CARGO_HOME ?= $(HOME)/.cargo
 PREFIX_MAP_CFLAGS := -ffile-prefix-map=$(CURDIR)=.
@@ -47,6 +49,7 @@ $(HELLO)/loader.img: $(SDK_LOADER)
 
 $(VMM)/loader.img: $(SDK_LOADER) FORCE
 	mkdir -p $(VMM)
+	tools/gen-trace-stamp.sh $(DEVICE_TXT) $(DEVICE_DTB) flake.lock $(VMM)/trace_stamp.h
 	$(MAKE) -C $(VMM) -f $(CURDIR)/vmm/vmm.mk TOP=$(CURDIR) MICROKIT_SDK=$(SDK) \
 		MICROKIT_BOARD=$(BOARD) MICROKIT_CONFIG=$(CONFIG) \
 		LIBVMM=$(abspath deps/libvmm) SDDF=$(abspath deps/sddf) \

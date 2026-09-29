@@ -47,10 +47,12 @@ HARNESS_CFLAGS := \
 	-MD -MP \
 	$(ARCH_FLAGS)
 
-VMM_OBJS := vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o images.o
+VMM_OBJS := vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o trace_producer.o images.o
+TRACER_OBJS := tracer.o
 
 LDFLAGS := -L$(BOARD_DIR)/lib
-LIBS := --start-group -lmicrokit -Tmicrokit.ld libvmm.a libsddf_util_debug.a --end-group
+VMM_LIBS := --start-group -lmicrokit -Tmicrokit.ld libvmm.a libsddf_util_console.a --end-group
+TRACER_LIBS := --start-group -lmicrokit -Tmicrokit.ld libsddf_util_debug.a --end-group
 
 vpath %.c $(TOP)/vmm $(LIBVMM)
 vpath %.S $(TOP)/vmm
@@ -75,20 +77,31 @@ harness/harness.bin: harness/harness.elf
 harness:
 	mkdir -p $@
 
-vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o: %.o: %.c
+vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o trace_producer.o console_putchar.o: %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 images.o: $(TOP)/vmm/images.S harness/harness.bin
 	$(CC) -c -x assembler-with-cpp -DGUEST_HARNESS_IMAGE_PATH=\"harness/harness.bin\" $(ARCH_FLAGS) $< -o $@
 
-vmm.elf: $(VMM_OBJS) libvmm.a libsddf_util_debug.a
-	$(LD) $(LDFLAGS) $(VMM_OBJS) $(LIBS) -o $@
+vmm.elf: $(VMM_OBJS) libvmm.a libsddf_util_console.a
+	$(LD) $(LDFLAGS) $(VMM_OBJS) $(VMM_LIBS) -o $@
 
-loader.img: vmm.elf $(TOP)/vmm/caiman.system
+tracer.o: $(TOP)/tracer/tracer.c trace_stamp.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
+
+tracer.elf: $(TRACER_OBJS) libsddf_util_debug.a
+	$(LD) $(LDFLAGS) $(TRACER_OBJS) $(TRACER_LIBS) -o $@
+
+loader.img: vmm.elf tracer.elf $(TOP)/vmm/caiman.system
 	$(MICROKIT_TOOL) $(TOP)/vmm/caiman.system --search-path . --board $(MICROKIT_BOARD) \
 		--config $(MICROKIT_CONFIG) -o $@ -r report.txt
 
 include $(LIBVMM)/vmm.mk
 include $(SDDF)/util/util.mk
 
--include $(VMM_OBJS:.o=.d) harness/*.d
+libsddf_util_console.a: $(BASE_OBJS_LIBUTIL) console_putchar.o
+	$(RM) $@
+	$(AR) crv $@ $^
+	$(RANLIB) $@
+
+-include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) harness/*.d

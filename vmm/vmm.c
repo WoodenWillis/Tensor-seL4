@@ -12,12 +12,17 @@
 #include "exynos_uart_emul.h"
 #include "mmio_forward.h"
 #include "mmio_trace.h"
+#include "trace_producer.h"
+#include "channels.h"
 
 extern char _guest_harness_image[];
 extern char _guest_harness_image_end[];
 
+#define TRACE_PRODUCER_ID 0
+
 uintptr_t guest_ram_vaddr;
 uintptr_t watchdog_cl0_vaddr;
+uintptr_t trace_ring_vaddr;
 
 static struct mmio_forward watchdog_cl0 = {
     .name = "watchdog_cl0",
@@ -41,6 +46,7 @@ static bool harness_load(void)
 void init(void)
 {
     LOG_VMM("starting \"%s\"\n", microkit_name);
+    trace_producer_init(trace_ring_vaddr, CH_TRACER, TRACE_PRODUCER_ID);
 
     arch_guest_init_t args = {
         .num_vcpus = 1,
@@ -56,7 +62,7 @@ void init(void)
     if (!harness_load()) {
         return;
     }
-    if (!exynos_uart_emul_init(HARNESS_UART_GPA, HARNESS_UART_SIZE, "harness")) {
+    if (!exynos_uart_emul_init(HARNESS_UART_GPA, HARNESS_UART_SIZE)) {
         LOG_VMM_ERR("failed to register UART emulation\n");
         return;
     }

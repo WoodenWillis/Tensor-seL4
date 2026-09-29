@@ -5,6 +5,8 @@
 #include "mmio_forward.h"
 #include "mmio_trace.h"
 
+#include <trace/trace_v0.h>
+
 static bool forward_access_supported(const struct mmio_forward *fwd, size_t offset, size_t fsr)
 {
     if (fault_is_write(fsr)) {
@@ -29,7 +31,7 @@ static bool forward_fault(size_t vcpu_id, size_t offset, size_t fsr, seL4_UserCo
 
     uint32_t val = *(volatile uint32_t *)(fwd->vmm_vaddr + offset);
     fault_emulate_write(regs, offset, fsr, val);
-    mmio_trace(vcpu_id, regs, fwd->gpa + offset, fsr, false, val);
+    mmio_trace(vcpu_id, regs, fwd->gpa + offset, fsr, TRACE_MMIO_FORWARDED, val);
     return true;
 }
 
