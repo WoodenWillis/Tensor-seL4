@@ -62,9 +62,13 @@
               pkgs.qemu
               pkgs.android-tools
               pkgs.picocom
+              pkgs.llvmPackages_18.clang-unwrapped
+              pkgs.llvmPackages_18.lld
+              pkgs.llvmPackages_18.llvm
             ];
 
             LIBCLANG_PATH = "${pkgs.llvmPackages_18.libclang.lib}/lib";
+            CLANG_RESOURCE_DIR = "${pkgs.llvmPackages_18.clang-unwrapped.lib}/lib/clang/18";
           };
         });
     };

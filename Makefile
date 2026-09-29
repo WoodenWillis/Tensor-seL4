@@ -11,12 +11,13 @@ SDK_LOADER = $(SDK)/board/$(BOARD)/$(CONFIG)/elf/loader.elf
 
 DEPS_STAMP := $(BUILD)/deps.stamp
 HELLO := $(BUILD)/hello
+VMM := $(BUILD)/vmm
 
 CARGO_HOME ?= $(HOME)/.cargo
 PREFIX_MAP_CFLAGS := -ffile-prefix-map=$(CURDIR)=.
 PREFIX_MAP_RUSTFLAGS := --remap-path-prefix=$(CURDIR)=. --remap-path-prefix=$(CARGO_HOME)=/cargo
 
-.PHONY: all deps sdk clean
+.PHONY: all deps sdk hello clean
 
 all: $(DEPS_STAMP)
 	$(MAKE) $(BUILD)/boot.img
@@ -44,8 +45,20 @@ $(HELLO)/loader.img: $(SDK_LOADER)
 	$(MAKE) -C $(MICROKIT)/example/hello BUILD_DIR=$(HELLO) MICROKIT_SDK=$(SDK) \
 		MICROKIT_BOARD=$(BOARD) MICROKIT_CONFIG=$(CONFIG)
 
-$(BUILD)/boot.img: $(HELLO)/loader.img tools/mkbootimg.sh tools/arm64-image.py
+$(VMM)/loader.img: $(SDK_LOADER) FORCE
+	mkdir -p $(VMM)
+	$(MAKE) -C $(VMM) -f $(CURDIR)/vmm/vmm.mk TOP=$(CURDIR) MICROKIT_SDK=$(SDK) \
+		MICROKIT_BOARD=$(BOARD) MICROKIT_CONFIG=$(CONFIG) \
+		LIBVMM=$(abspath deps/libvmm) SDDF=$(abspath deps/sddf) \
+		PREFIX_MAP_CFLAGS='$(PREFIX_MAP_CFLAGS)'
+
+$(BUILD)/boot.img: $(VMM)/loader.img tools/mkbootimg.sh tools/arm64-image.py
 	tools/mkbootimg.sh $< $@
+
+hello: $(DEPS_STAMP) $(HELLO)/loader.img tools/mkbootimg.sh tools/arm64-image.py
+	tools/mkbootimg.sh $(HELLO)/loader.img $(BUILD)/hello.img
+
+FORCE:
 
 clean:
 	rm -rf $(BUILD)

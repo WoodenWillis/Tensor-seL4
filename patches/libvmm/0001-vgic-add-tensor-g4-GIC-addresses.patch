@@ -1,0 +1,30 @@
+From ae52d393e2aaa8a7fc9a75ef39f889e8c31250a2 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Mon, 28 Sep 2026 21:04:32 -0400
+Subject: [PATCH] vgic: add tensor-g4 GIC addresses
+
+GICD at 0x10400000 and the first redistributor at 0x10440000, from the
+caiman vendor DTB. The guest sees the virtual GIC at the same
+addresses as the physical one. GICv3 confirmed on hardware (GICD_PIDR2
+0x3b) with the 128 KiB redistributor stride libvmm assumes.
+---
+ include/libvmm/arch/aarch64/vgic/vgic.h | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/include/libvmm/arch/aarch64/vgic/vgic.h b/include/libvmm/arch/aarch64/vgic/vgic.h
+index b3955a17..d9416684 100644
+--- a/include/libvmm/arch/aarch64/vgic/vgic.h
++++ b/include/libvmm/arch/aarch64/vgic/vgic.h
+@@ -29,6 +29,9 @@
+ #elif defined(CONFIG_PLAT_BCM2711)
+ #define GIC_V2
+ #define GIC_DIST_PADDR      0xff841000ul
++#elif defined(CONFIG_PLAT_TENSOR_G4)
++#define GIC_DIST_PADDR      0x10400000UL
++#define GIC_REDIST_PADDR    0x10440000UL
+ #else
+ #error Need to define GIC addresses
+ #endif
+-- 
+2.53.0
+

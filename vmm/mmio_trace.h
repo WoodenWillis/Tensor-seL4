@@ -1,0 +1,11 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <microkit.h>
+
+void mmio_trace(size_t vcpu_id, const seL4_UserContext *regs, uintptr_t addr, size_t fsr, bool is_write,
+                uint64_t value);
