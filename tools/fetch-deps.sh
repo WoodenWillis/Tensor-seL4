@@ -19,7 +19,7 @@ die() {
 
 repo_init() {
     mkdir -p "$deps"
-    (cd "$deps" && repo init -u "$top" -m manifest/default.xml)
+    (cd "$deps" && repo init --standalone-manifest -u "file://$top/manifest/default.xml")
 }
 
 check_clean() {
@@ -57,7 +57,7 @@ apply_patches() {
 }
 
 main() {
-    [ -d "$deps/.repo" ] || repo_init
+    repo_init
     check_clean
     (cd "$deps" && repo sync -d)
     local project
