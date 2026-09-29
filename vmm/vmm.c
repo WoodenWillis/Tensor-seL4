@@ -10,6 +10,7 @@
 
 #include "harness_map.h"
 #include "exynos_uart_emul.h"
+#include "mmio_trace.h"
 
 extern char _guest_harness_image[];
 extern char _guest_harness_image_end[];
@@ -61,10 +62,40 @@ void notified(microkit_channel ch)
     LOG_VMM_ERR("unexpected notification on channel %u\n", ch);
 }
 
+struct vm_fault {
+    bool is_vm_fault;
+    uintptr_t pc;
+    uintptr_t addr;
+    size_t fsr;
+};
+
+static struct vm_fault vm_fault_save(microkit_msginfo msginfo)
+{
+    struct vm_fault f = { .is_vm_fault = microkit_msginfo_get_label(msginfo) == seL4_Fault_VMFault };
+
+    if (f.is_vm_fault) {
+        f.pc = microkit_mr_get(seL4_VMFault_IP);
+        f.addr = microkit_mr_get(seL4_VMFault_Addr);
+        f.fsr = microkit_mr_get(seL4_VMFault_FSR);
+    }
+    return f;
+}
+
+static void guest_stop_unhandled(microkit_child child, const struct vm_fault *f)
+{
+    if (f->is_vm_fault) {
+        mmio_trace_unhandled(child, f->pc, f->addr, f->fsr);
+    }
+    microkit_vcpu_stop(child);
+    LOG_VMM_ERR("guest stopped: fault not handled\n");
+}
+
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
+    struct vm_fault f = vm_fault_save(msginfo);
+
     if (!fault_handle(child, msginfo)) {
-        LOG_VMM_ERR("guest stopped: fault not handled\n");
+        guest_stop_unhandled(child, &f);
         return seL4_False;
     }
     *reply_msginfo = microkit_msginfo_new(0, 0);
