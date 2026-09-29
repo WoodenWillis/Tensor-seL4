@@ -28,8 +28,22 @@ static void wait_for_space(uint64_t head)
     }
 }
 
+static void producer_lock(void)
+{
+    while (__atomic_exchange_n(&ring->producer_lock, 1, __ATOMIC_ACQUIRE)) {
+        while (__atomic_load_n(&ring->producer_lock, __ATOMIC_RELAXED)) {
+        }
+    }
+}
+
+static void producer_unlock(void)
+{
+    __atomic_store_n(&ring->producer_lock, 0, __ATOMIC_RELEASE);
+}
+
 void trace_emit(struct trace_record *rec)
 {
+    producer_lock();
     uint64_t head = __atomic_load_n(&ring->head, __ATOMIC_RELAXED);
 
     wait_for_space(head);
@@ -38,5 +52,6 @@ void trace_emit(struct trace_record *rec)
     rec->producer = producer_id;
     ring->records[head % TRACE_RING_CAPACITY] = *rec;
     __atomic_store_n(&ring->head, head + 1, __ATOMIC_RELEASE);
+    producer_unlock();
     microkit_notify(tracer_ch);
 }

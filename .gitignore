@@ -4,3 +4,4 @@
 /device-data/
 CLAUDE.md
 /build/
+__pycache__/

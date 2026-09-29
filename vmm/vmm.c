@@ -19,8 +19,6 @@
 extern char _guest_harness_image[];
 extern char _guest_harness_image_end[];
 
-#define TRACE_PRODUCER_ID 0
-
 uintptr_t guest_ram_vaddr;
 uintptr_t watchdog_cl0_vaddr;
 uintptr_t trace_ring_vaddr;
@@ -47,7 +45,7 @@ static bool harness_load(void)
 void init(void)
 {
     LOG_VMM("starting \"%s\"\n", microkit_name);
-    trace_producer_init(trace_ring_vaddr, CH_TRACER, TRACE_PRODUCER_ID);
+    trace_producer_init(trace_ring_vaddr, CH_TRACER, TRACE_PRODUCER_VMM);
 
     arch_guest_init_t args = {
         .num_vcpus = 1,

@@ -56,6 +56,28 @@ relocked phone requires unlocking it again first.
 The DTS property `samsung,dbg-uart-baud = <115200>` does not reflect the rate in
 use. The line runs at 3000000.
 
+## Host to phone
+
+Receiving works: bytes sent from the host at 3000000 8N1 reach the phone's UART (user-confirmed 2026-09-29, then on the first `uartrx` console boot the same day).
+
+The `uartrx` PD is a typed console. Once `> ` appears, type into picocom:
+```
+help
+ping
+trace-dump
+```
+What you type is echoed. picocom's Enter sends CR, which `uartrx` accepts. `trace-dump` prints the trace archive, so log the session (`picocom -g boot.log …`) if you want to decode it with `tools/trace-decode.py boot.log`. See "Host commands" in `docs/trace-format.md`.
+
+`tools/sel4-cmd.py trace-dump` types one line from a script.
+
+## Logging
+
+```
+tools/serial-log.py boot.log
+```
+
+This writes everything from the port to `boot.log` byte for byte. The screen shows the same output with trace lines (`TRH*`/`TRC*`) hidden, and only three kinds of record appear, each as one decoded line: host commands, guest accesses the VMM refused, and SMCs the policy refused. It doesn't open the port exclusively, so `tools/sel4-cmd.py` can type from another terminal while it runs. It doesn't send your keystrokes, though; use picocom to type interactively.
+
 ## Not yet recorded
 
 - Which of SBU1/SBU2 carries the phone's TX.

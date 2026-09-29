@@ -5,7 +5,7 @@ import re
 import struct
 import sys
 
-VERSIONS = (0, 1)
+VERSIONS = (0, 1, 2)
 MAGIC = b"SEL4TRC\0"
 RECORD = struct.Struct("<QQQQQIHBBBB6xQ")
 HEADER = struct.Struct("<8sHHI16s32s48s48s48s64s64s")
@@ -14,7 +14,12 @@ KIND_MMIO = 1
 KIND_SMC_ENTER = 2
 KIND_SMC_REGS = 3
 KIND_SMC_EXIT = 4
-KINDS_BY_VERSION = {0: {KIND_MMIO}, 1: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT}}
+KIND_CMD = 5
+KINDS_BY_VERSION = {
+    0: {KIND_MMIO},
+    1: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT},
+    2: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD},
+}
 
 MMIO_WRITE = 1 << 0
 MMIO_FORWARDED = 1 << 1
@@ -23,6 +28,10 @@ MMIO_UNHANDLED = 1 << 2
 SMC_REGS_EXIT = 1 << 0
 SMC_FORWARDED = 1 << 1
 SMC_UNHANDLED = 1 << 2
+
+CMD_ACCEPTED = 1 << 0
+CMD_REJECTED_VERB = 1 << 2
+CMD_VERBS = {0: "-", 1: "ping", 2: "trace-dump", 3: "help"}
 
 HEADER_LINE = re.compile(r"TRH([0-9]) ([0-9a-f]*)")
 RECORD_LINE = re.compile(r"TRC([0-9]) ([0-9a-f]*)")
@@ -78,7 +87,21 @@ def format_smc(rec):
     return f"{prefix} SMC EXIT {how} x0=0x{rec['addr']:x} x1=0x{rec['value']:x}"
 
 
+def format_cmd(rec):
+    flags = rec["flags"]
+    if flags & CMD_ACCEPTED:
+        how = "ACCEPTED"
+    elif flags & CMD_REJECTED_VERB:
+        how = "REJECTED_VERB"
+    else:
+        how = f"flags=0x{flags:x}"
+    verb = CMD_VERBS.get(rec["addr"], f"verb{rec['addr']}")
+    return f"seq={rec['seq']} t={rec['time']} p{rec['producer']} CMD id={rec['value']} {verb} {how}"
+
+
 def format_record(rec):
+    if rec["kind"] == KIND_CMD:
+        return format_cmd(rec)
     if rec["kind"] in (KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT):
         return format_smc(rec)
     flags = rec["flags"]
@@ -112,6 +135,8 @@ class Console:
 
 def decode(stream, out, console_tx):
     header = None
+    header_hex = None
+    pending = []
     expected_seq = 0
     decoded = 0
     errors = 0
@@ -122,37 +147,17 @@ def decode(stream, out, console_tx):
         errors += 1
         print(f"ERROR line {lineno}: {msg}", file=out)
 
-    for lineno, line in enumerate(stream, 1):
-        m = HEADER_LINE.search(line)
-        if m:
-            try:
-                header = parse_header(m.group(2))
-            except (TraceError, ValueError) as e:
-                error(lineno, f"header: {e}")
-                continue
-            version, cntfrq, stamp = header
-            if int(m.group(1)) != version:
-                error(lineno, f"TRH{m.group(1)} line carries a version {version} header")
-            print(f"trace v{version} cntfrq={cntfrq}", file=out)
-            for name in STAMP_FIELDS:
-                print(f"  {name}: {stamp[name]}", file=out)
-            continue
-
-        m = RECORD_LINE.search(line)
-        if not m:
-            continue
-        if header is None:
-            error(lineno, "record before header")
-            continue
+    def record(lineno, digit, hexdata):
+        nonlocal expected_seq, decoded
         version = header[0]
-        if int(m.group(1)) != version:
-            error(lineno, f"TRC{m.group(1)} record in a version {version} trace")
-            continue
+        if digit != version:
+            error(lineno, f"TRC{digit} record in a version {version} trace")
+            return
         try:
-            rec = parse_record(m.group(2))
+            rec = parse_record(hexdata)
         except (TraceError, ValueError) as e:
             error(lineno, f"record: {e}")
-            continue
+            return
         if rec["kind"] not in KINDS_BY_VERSION[version]:
             error(lineno, f"kind {rec['kind']} is not defined in version {version}")
         if rec["seq"] != expected_seq:
@@ -164,14 +169,49 @@ def decode(stream, out, console_tx):
         if text_line is not None:
             print(f"  guest| {text_line}", file=out)
 
+    for lineno, line in enumerate(stream, 1):
+        m = HEADER_LINE.search(line)
+        if m:
+            digit, hexdata = int(m.group(1)), m.group(2)
+            try:
+                parsed = parse_header(hexdata)
+            except (TraceError, ValueError) as e:
+                error(lineno, f"header: {e}")
+                continue
+            if digit != parsed[0]:
+                error(lineno, f"TRH{digit} line carries a version {parsed[0]} header")
+                continue
+            if header is not None:
+                if hexdata != header_hex:
+                    error(lineno, "header differs from the first header in this trace")
+                continue
+            header, header_hex = parsed, hexdata
+            version, cntfrq, stamp = header
+            print(f"trace v{version} cntfrq={cntfrq}", file=out)
+            for name in STAMP_FIELDS:
+                print(f"  {name}: {stamp[name]}", file=out)
+            for args in pending:
+                record(*args)
+            pending = []
+            continue
+
+        m = RECORD_LINE.search(line)
+        if not m:
+            continue
+        args = (lineno, int(m.group(1)), m.group(2))
+        if header is None:
+            pending.append(args)
+        else:
+            record(*args)
+
     if header is None:
-        error(0, "no trace header found")
+        error(0, f"no valid trace header found ({len(pending)} records could not be decoded)")
     print(f"{decoded} records, {errors} errors", file=out)
     return errors
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Decode a trace format v0 or v1 serial log.")
+    parser = argparse.ArgumentParser(description="Decode a trace format v0, v1 or v2 serial log.")
     parser.add_argument("log", nargs="?", type=argparse.FileType("r", errors="replace"), default=sys.stdin)
     parser.add_argument("--console-tx", type=lambda s: int(s, 0),
                         help="guest-physical address of a UART TX register to reassemble guest output from")

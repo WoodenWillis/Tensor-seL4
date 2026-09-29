@@ -49,6 +49,7 @@ HARNESS_CFLAGS := \
 
 VMM_OBJS := vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o images.o
 TRACER_OBJS := tracer.o
+UARTRX_OBJS := uartrx.o trace_producer.o
 
 LDFLAGS := -L$(BOARD_DIR)/lib
 VMM_LIBS := --start-group -lmicrokit -Tmicrokit.ld libvmm.a libsddf_util_console.a --end-group
@@ -92,7 +93,13 @@ tracer.o: $(TOP)/tracer/tracer.c trace_stamp.h
 tracer.elf: $(TRACER_OBJS) libsddf_util_debug.a
 	$(LD) $(LDFLAGS) $(TRACER_OBJS) $(TRACER_LIBS) -o $@
 
-loader.img: vmm.elf tracer.elf $(TOP)/vmm/caiman.system
+uartrx.o: $(TOP)/uartrx/uartrx.c
+	$(CC) $(CFLAGS) -I$(TOP)/vmm -c -o $@ $<
+
+uartrx.elf: $(UARTRX_OBJS) libsddf_util_debug.a
+	$(LD) $(LDFLAGS) $(UARTRX_OBJS) $(TRACER_LIBS) -o $@
+
+loader.img: vmm.elf tracer.elf uartrx.elf $(TOP)/vmm/caiman.system
 	$(MICROKIT_TOOL) $(TOP)/vmm/caiman.system --search-path . --board $(MICROKIT_BOARD) \
 		--config $(MICROKIT_CONFIG) -o $@ -r report.txt
 
@@ -104,4 +111,4 @@ libsddf_util_console.a: $(BASE_OBJS_LIBUTIL) console_putchar.o
 	$(AR) crv $@ $^
 	$(RANLIB) $@
 
--include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) harness/*.d
+-include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) uartrx.d harness/*.d

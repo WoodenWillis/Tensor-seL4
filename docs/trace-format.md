@@ -1,17 +1,26 @@
 # Trace format
 
-Current version: **1**. Changing anything below is a breaking change: bump the version, and keep the old decoder working. The decoder (`tools/trace-decode.py`) reads versions 0 and 1.
+Current version: **2**. Changing anything below is a breaking change: bump the version, and keep the old decoder working. The decoder (`tools/trace-decode.py`) reads versions 0, 1 and 2.
 
 Definitions: `include/trace/trace.h` (C) and `tools/trace-decode.py` (host decoder). All integers are little-endian.
 
 ## Transport
 
-The tracer PD writes to the serial console with `microkit_dbg_puts`. That output exists only in debug kernel configurations. Each unit is one line, and the digit in the prefix is the format version:
+Records are **not streamed.** The tracer drains the trace ring into an 8 MiB archive in RAM (`include/trace/trace_archive.h`, 131071 records) and prints nothing until the host sends `trace-dump` (see "Host commands"). A dump prints the whole archive so far, then `TRACER|INFO: dumped N records, M not archived (archive full)`.
+
+Consequences:
+- **A crash or reset loses everything not yet dumped.** The archive lives only in RAM.
+- **When the archive is full, new records are counted, not stored.** Older records are never overwritten, so a dump is always a gapless prefix of the trace.
+- **While a dump is printing, the tracer doesn't drain the ring.** If it fills, producers wait and the guest stalls, as usual.
+
+A dump is written to the serial console with `microkit_dbg_puts`. That output exists only in debug kernel configurations. Each unit is one line, and the digit in the prefix is the format version:
 
 | Prefix | Payload | Meaning |
 |---|---|---|
-| `TRH1 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent once, before the first record. |
-| `TRC1 ` | 128 lowercase hex characters (64 bytes) | One record. |
+| `TRH2 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
+| `TRC2 ` | 128 lowercase hex characters (64 bytes) | One record. |
+
+The header is repeated because it's the one line whose loss would make the whole trace undecodable. Kernel debug output isn't serialised across cores. On the first v2 boot, the monitor's `MON|INFO: Microkit Monitor started!` on core 0 interleaved character by character with the tracer's first header on core 1. The decoder uses the first valid header copy, holds any records that arrive before it, and treats a later copy that differs as an error.
 
 Other console output can appear on other lines. The decoder finds the prefix anywhere in a line. A line with a known prefix but the wrong payload length is an error, never skipped. So is a prefix digit that doesn't match the header's version.
 
@@ -46,8 +55,8 @@ Every record has the same layout. How `addr`, `value`, `size` and `flags` are in
 | 32 | 8 | value | Depends on kind |
 | 40 | 4 | esr | Syndrome (ESR_EL2) as delivered by seL4 |
 | 44 | 2 | vcpu | vCPU ID within the producer's VM |
-| 46 | 1 | producer | ID of the VMM that produced the record |
-| 47 | 1 | kind | 1 MMIO, 2 SMC_ENTER, 3 SMC_REGS, 4 SMC_EXIT |
+| 46 | 1 | producer | Who produced the record: 0 the VMM, 1 `uartrx` (host commands) |
+| 47 | 1 | kind | 1 MMIO, 2 SMC_ENTER, 3 SMC_REGS, 4 SMC_EXIT, 5 CMD |
 | 48 | 1 | size | Depends on kind |
 | 49 | 1 | flags | Depends on kind |
 | 50 | 14 | reserved | 0 |
@@ -74,6 +83,18 @@ A guest `smc` instruction (seL4 traps it: HCR_EL2.TSC). One call produces a run 
 
 Registers x0–x7 are recorded. That's everything seL4's SMC forwarding passes to and from EL3.
 
+### kind 5: CMD
+
+One non-empty command line typed on the console (see "Host commands" below). Produced by `uartrx`. `pc`, `esr`, `vcpu` and `size` are 0.
+
+| Field | Contents |
+|---|---|
+| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help` |
+| value | The line's number: 1 for the first command typed after boot, then 2, 3, … |
+| flags | Bit 0 ACCEPTED. Bit 2 REJECTED_VERB (unknown command). Exactly one is set. Bit 1 is unused. |
+
+Empty lines produce no record.
+
 ### SMC policy (`vmm/smc_policy.c`)
 
 | Call | Action |
@@ -86,11 +107,11 @@ Registers x0–x7 are recorded. That's everything seL4's SMC forwarding passes t
 
 - **Nothing is dropped.** If the ring is full, the producer waits for the tracer to drain it. The guest is stalled for that time and keeps its place in the sequence.
 - **A gap or reordering in `seq` is always an error.** The decoder reports it and exits non-zero.
-- **Only one producer** per ring (one VMM). The sequence counter is already shared, so more producers can be added without changing the record format.
+- **Two producers share the ring:** the VMM and `uartrx`. A producer lock in the ring header covers each record from allocating `seq` to publishing it, and the timestamp is taken inside the lock, so `time` never decreases as `seq` increases, across producers.
 - **MMIO traps and SMCs are recorded.** Interrupt delivery is not yet traced.
 - **No DMA is observed.** A trace does not show memory accesses made by devices.
 - **No identifier scrubbing yet.** The records produced so far come from the test harness and contain no device identifiers. Scrubbing will happen in the tracer, before any driver that can see identifiers is observed. For SMCs that includes arguments and results.
-- **The tracer is the only writer to the console while the system runs.** Everything the VMM prints, including libvmm's messages and register dumps, goes into a separate console ring (`include/trace/console_ring.h`), which the tracer prints after each batch of records. The kernel's own debug messages, and libmicrokit's direct `microkit_dbg_puts` calls, still go straight to the UART and can land inside a line. A record damaged that way is reported as an error, never skipped.
+- **The tracer is the only writer to the console while the system runs.** Everything the VMM prints, including libvmm's messages and register dumps, goes into a separate console ring (`include/trace/console_ring.h`), and `uartrx` has one of its own. The tracer prints both after each batch of records. The kernel's own debug messages, and libmicrokit's direct `microkit_dbg_puts` calls, still go straight to the UART and can land inside a line. A record damaged that way is reported as an error, never skipped.
 - **Console text isn't ordered relative to records.** The tracer drains the trace ring before the console ring each time it wakes, so VMM messages can appear after records that were produced later. Order comes from `seq` only.
 
 ## Version history
@@ -99,6 +120,18 @@ Registers x0–x7 are recorded. That's everything seL4's SMC forwarding passes t
 |---|---|
 | 0 | MMIO records only (kind 1). Lines `TRH0` / `TRC0`. |
 | 1 | Adds SMC_ENTER, SMC_REGS and SMC_EXIT (kinds 2–4). The record and header layouts are unchanged. Lines `TRH1` / `TRC1`. |
+| 2 | Adds CMD (kind 5) and a second producer (`uartrx`, producer 1). Layouts unchanged. Lines `TRH2` / `TRC2`. |
+
+## Host commands
+
+`uartrx` is a small typed console on the same UART. It polls the receive FIFO, maps the UART read-only and touches only the receive registers.
+
+- Type a command and press Enter. CR, LF and CRLF all end a line. Backspace works, and what you type is echoed. A `> ` prompt means it's ready.
+- Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive).
+- Each non-empty line gets a number (1, 2, 3, …) and a CMD record: ACCEPTED, or REJECTED_VERB for an unknown command, which is answered with `unknown command; type help`.
+- If the UART reported receive errors while a line was typed, `UARTRX|WARN: receive errors on this line, UERSTAT …` is printed first. Bits: 0x1 overrun, 0x2 parity, 0x4 framing, 0x8 break.
+
+From a script: `tools/sel4-cmd.py trace-dump` types one line.
 
 ## Decoding
 

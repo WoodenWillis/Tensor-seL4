@@ -5,6 +5,10 @@
     <memory_region name="watchdog_cl0" size="0x1000" phys_addr="0x10060000" />
     <memory_region name="trace_ring" size="0x10000" />
     <memory_region name="console_ring" size="0x4000" />
+    <memory_region name="uartrx_console_ring" size="0x4000" />
+    <memory_region name="uart" size="0x1000" phys_addr="0x10870000" />
+    <memory_region name="trace_archive" size="0x800000" />
+    <memory_region name="trace_control" size="0x1000" />
 
     <protection_domain name="VMM" priority="254" smc="true">
         <program_image path="vmm.elf" />
@@ -22,10 +26,26 @@
         <program_image path="tracer.elf" />
         <map mr="trace_ring" vaddr="0x40000000" perms="rw" setvar_vaddr="trace_ring_vaddr" />
         <map mr="console_ring" vaddr="0x40010000" perms="rw" setvar_vaddr="console_ring_vaddr" />
+        <map mr="uartrx_console_ring" vaddr="0x40014000" perms="rw" setvar_vaddr="uartrx_console_ring_vaddr" />
+        <map mr="trace_archive" vaddr="0x50000000" perms="rw" setvar_vaddr="trace_archive_vaddr" />
+        <map mr="trace_control" vaddr="0x40018000" perms="r" setvar_vaddr="trace_control_vaddr" />
+    </protection_domain>
+
+    <protection_domain name="uartrx" priority="100" cpu="2">
+        <program_image path="uartrx.elf" />
+        <map mr="uart" vaddr="0x30000000" perms="r" cached="false" setvar_vaddr="uart_vaddr" />
+        <map mr="trace_ring" vaddr="0x40000000" perms="rw" setvar_vaddr="trace_ring_vaddr" />
+        <map mr="uartrx_console_ring" vaddr="0x40010000" perms="rw" setvar_vaddr="console_ring_vaddr" />
+        <map mr="trace_control" vaddr="0x40014000" perms="rw" setvar_vaddr="trace_control_vaddr" />
     </protection_domain>
 
     <channel>
         <end pd="VMM" id="1" />
         <end pd="tracer" id="1" />
+    </channel>
+
+    <channel>
+        <end pd="uartrx" id="1" />
+        <end pd="tracer" id="2" />
     </channel>
 </system>

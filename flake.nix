@@ -31,6 +31,7 @@
             ps.pyfdt
             ps.setuptools
             ps.jsonschema
+            ps.pyserial
           ]);
 
           # TODO(will): keep in sync with deps/microkit/tool/microkit/Cargo.toml rust-version

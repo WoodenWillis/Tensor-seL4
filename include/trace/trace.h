@@ -4,11 +4,12 @@
 
 #include <stdint.h>
 
-/* docs/trace-format.md, version 1 */
-#define TRACE_VERSION               1
+/* docs/trace-format.md, version 2 */
+#define TRACE_VERSION               2
 #define TRACE_MAGIC                 "SEL4TRC"
 #define TRACE_RECORD_SIZE           64
 #define TRACE_HEADER_SIZE           336
+#define TRACE_HEADER_INTERVAL       64
 #define TRACE_RING_SIZE             0x10000
 #define TRACE_RING_HEADER_SIZE      64
 #define TRACE_RING_CAPACITY         ((TRACE_RING_SIZE - TRACE_RING_HEADER_SIZE) / TRACE_RECORD_SIZE)
@@ -17,6 +18,7 @@
 #define TRACE_KIND_SMC_ENTER        2
 #define TRACE_KIND_SMC_REGS         3
 #define TRACE_KIND_SMC_EXIT         4
+#define TRACE_KIND_CMD              5
 
 #define TRACE_MMIO_WRITE            (1u << 0)
 #define TRACE_MMIO_FORWARDED        (1u << 1)
@@ -25,6 +27,17 @@
 #define TRACE_SMC_REGS_EXIT         (1u << 0)
 #define TRACE_SMC_FORWARDED         (1u << 1)
 #define TRACE_SMC_UNHANDLED         (1u << 2)
+
+#define TRACE_CMD_ACCEPTED          (1u << 0)
+#define TRACE_CMD_REJECTED_VERB     (1u << 2)
+
+#define TRACE_CMD_VERB_NONE         0
+#define TRACE_CMD_VERB_PING         1
+#define TRACE_CMD_VERB_TRACE_DUMP   2
+#define TRACE_CMD_VERB_HELP         3
+
+#define TRACE_PRODUCER_VMM          0
+#define TRACE_PRODUCER_UARTRX       1
 
 struct trace_record {
     uint64_t seq;
@@ -64,7 +77,8 @@ struct trace_ring {
     uint64_t head;
     uint64_t tail;
     uint64_t next_seq;
-    uint8_t reserved[TRACE_RING_HEADER_SIZE - 3 * sizeof(uint64_t)];
+    uint32_t producer_lock;
+    uint8_t reserved[TRACE_RING_HEADER_SIZE - 3 * sizeof(uint64_t) - sizeof(uint32_t)];
     struct trace_record records[TRACE_RING_CAPACITY];
 };
 
