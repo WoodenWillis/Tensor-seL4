@@ -7,7 +7,7 @@ deps=$top/deps
 patches=$top/patches
 
 declare -A patched_head=(
-    [microkit]=146330229413048ac38170620b9e81a30a60594b
+    [microkit]=2081ca9813bce9104629703aa48ccd03750c5e8d
     [rust-sel4]=49fb1e9d35b9f04a71201383e6839c166c36c501
     [seL4]=c867f3a2734382460a78292251497f001d803de8
 )
