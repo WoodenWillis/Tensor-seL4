@@ -46,7 +46,7 @@ Echo goes uartrx (CPU 2) → tracer (CPU 1) → `seL4_DebugPutChar` and doesn't 
 |---|---|
 | First seen | 2026-09-30, at 0b90826 plus `arm64.nopauth` (trace stamp `0b9082623b6d-dirty`) |
 | Build | as above |
-| Occurrences | 1 of 8 Linux guest boots |
+| Occurrences | 2 of 10 Linux guest boots, both stopping after the same guest record |
 | Symptom | Last guest line `[    0.464540][    T1] kvm [1]: HYP mode not available`. `Trying to unpack rootfs image as initramfs...` (T8) never reports finishing |
 | Still working | uartrx (`ping` answered `pong`) and the tracer (`trace-dump` printed 41827 records, 0 not archived, 0 decode errors) |
 | Not yet known | Whether the VMM still answered; no `status` was sent |
@@ -58,3 +58,5 @@ What the trace shows:
 - No refusal and no UNHANDLED record, so the VMM didn't stop the guest.
 
 The trace doesn't record WFI/WFE traps or virtual interrupt delivery, so it can't tell a guest spinning at EL1 apart from a guest idling in WFI and waiting for an interrupt that never arrives.
+
+Seen again at ffcd608 (`logs/boot2.log`, not committed), and the stop is deterministic, not random. The last guest line is again `kvm [1]: HYP mode not available`. The dump again has 41827 records, 41824 of them from the guest, the same count as the first occurrence; the two differ only in printed timestamps. This build prints a VMM heartbeat once a second from the fault path, and none appeared. So after the stop the VMM received no fault of any kind: no WFI/WFE trap, and no virtual-timer VPPI event, although the guest's tick would produce one every few milliseconds. The guest isn't idling. Either it spins at EL1 without trapping, with no timer interrupt reaching the VMM, or CPU 0 isn't running it. In the boot that reached `/init`, the next line after `kvm` was `Initialise system trusted keyrings`.
