@@ -50,7 +50,7 @@ The Linux VM is described in `guests/linux/`:
 | DTB | GPA `0x8f000000`, from `caiman-vm.dts.S`, with the initrd bounds filled in from the cpio size |
 | Devices in the DTB | one CPU, PSCI (smc), GICv3 (libvmm vGIC at the physical GIC's addresses), arch timer |
 | UART | no DT node; only `earlycon=exynos4210,mmio32,0x10870000` prints, through the VMM's UART emulation |
-| cmdline | `earlycon=exynos4210,mmio32,0x10870000 keep_bootcon rdinit=/init loglevel=8 nokaslr arm64.nosve` |
+| cmdline | `earlycon=exynos4210,mmio32,0x10870000 keep_bootcon rdinit=/init loglevel=8 nokaslr arm64.nosve arm64.nomte` |
 
 ### Differences from the real CPU
 
@@ -59,6 +59,7 @@ The guest reads the real ID registers (seL4 doesn't trap them), but it doesn't g
 | Feature | Real CPU | Guest | How | Found by |
 |---|---|---|---|---|
 | SVE | `ID_AA64PFR0_EL1.SVE` = 1 (`0x1201111123111111`) | none | `arm64.nosve`: in this kernel `init_cpu_features()` probes `ZCR_EL1` only if the override-applied `ID_AA64PFR0_EL1` shows SVE (`cpufeature.c`, `idreg-override.c` at `d7dac4b14270`) | Without it the guest traps with EC 0x19 (HSR `0x66000000`) on `msr ZCR_EL1` at `0xffffffc0080180cc`. `CPTR_EL2.TZ` is set while the guest runs: seL4 changes only `CPTR_EL2.TFP`, and in the hypervisor configuration the loader leaves `CPTR_EL2` as ABL set it. seL4 doesn't save or restore SVE state, so giving guests SVE would be a kernel change |
+| MTE | `ID_AA64PFR1_EL1.MTE` ≥ 2; the guest logs `detected: Memory Tagging Extension` and `Asymmetric MTE Tag Check Fault` | none | `arm64.nomte` (`id_aa64pfr1.mte=0`): both capabilities match through `has_cpuid_feature()`, and the local-CPU read `__read_sysreg_by_encoding()` applies the override too (`cpufeature.c` at `d7dac4b14270`) | Without it the guest traps with EC 0x18 (HSR `0x623c0520`) on `msr GCR_EL1` in `mte_cpu_setup()` at `0xffffffc00803c74c`. seL4's `HCR_VCPU` doesn't set `HCR_EL2.ATA`, so the MTE control registers trap, and seL4 switches no MTE state. The stock kernel on the phone does enable MTE at this point, so a vendor driver in the guest runs without it |
 | PSCI | TF-A reports 1.1 | libvmm reports 1.2 | libvmm emulates PSCI for its vCPUs | Guest log `psci: PSCIv1.2 detected in firmware` |
 
 `/init` (`guests/linux/init.c`) is freestanding and uses raw syscalls: it writes `init: hello from userspace` to fd 1 and then blocks in `ppoll` forever, so the guest stays running until `guest-stop`.
