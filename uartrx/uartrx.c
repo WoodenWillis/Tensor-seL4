@@ -73,6 +73,14 @@ static void console_puthex32(uint32_t val)
     }
 }
 
+static void console_puthex64(uint64_t val)
+{
+    console_puts("0x");
+    for (int shift = 60; shift >= 0; shift -= 4) {
+        console_putc("0123456789abcdef"[(val >> shift) & 0xf]);
+    }
+}
+
 static void console_putdec(uint64_t val)
 {
     char buf[21];
@@ -171,6 +179,44 @@ static uint64_t read_cntfrq(void)
     return val;
 }
 
+static const char *vmm_phase_name(uint64_t phase)
+{
+    switch (phase) {
+    case VMM_PHASE_IDLE:
+        return "idle in its event loop";
+    case VMM_PHASE_FAULT:
+        return "inside fault()";
+    case VMM_PHASE_NOTIFIED:
+        return "inside notified()";
+    default:
+        return "in an unknown phase";
+    }
+}
+
+static void report_vmm_breadcrumb(const struct cmd_ring *ring)
+{
+    const struct vmm_breadcrumb *crumb = &ring->breadcrumb;
+    uint64_t seq = __atomic_load_n(&crumb->seq, __ATOMIC_ACQUIRE);
+    uint64_t since = __atomic_load_n(&crumb->since, __ATOMIC_RELAXED);
+    uint64_t ms = (read_cntpct() - since) / (read_cntfrq() / 1000);
+
+    console_puts("UARTRX|WARN: VMM breadcrumb: ");
+    console_puts(vmm_phase_name(__atomic_load_n(&crumb->phase, __ATOMIC_RELAXED)));
+    console_puts(" for ");
+    console_putdec(ms);
+    console_puts(" ms, label/ch ");
+    console_putdec(__atomic_load_n(&crumb->label, __ATOMIC_RELAXED));
+    console_puts(" mr0 ");
+    console_puthex64(__atomic_load_n(&crumb->mr0, __ATOMIC_RELAXED));
+    console_puts(" mr1 ");
+    console_puthex64(__atomic_load_n(&crumb->mr1, __ATOMIC_RELAXED));
+    console_puts(", seq ");
+    console_putdec(seq);
+    console_puts(", console waits ");
+    console_putdec(__atomic_load_n(&crumb->console_waits, __ATOMIC_RELAXED));
+    console_puts("\n");
+}
+
 static bool wait_for_vmm(struct cmd_ring *ring, uint64_t id)
 {
     uint64_t deadline = read_cntpct() + read_cntfrq() / 1000 * VMM_REPLY_TIMEOUT_MS;
@@ -199,6 +245,7 @@ static void cmd_to_vmm(uint64_t id, uint64_t verb)
         console_puts("UARTRX|WARN: the VMM did not finish command ");
         console_putdec(id);
         console_puts(" within 2 s\n");
+        report_vmm_breadcrumb(ring);
     }
 }
 

@@ -11,6 +11,7 @@
 
 #include "guest_map.h"
 #include "exynos_uart_emul.h"
+#include "breadcrumb.h"
 #include "guest_control.h"
 #include "guest_stats.h"
 #include "mmio_forward.h"
@@ -35,6 +36,7 @@ static struct mmio_forward watchdog_cl0 = {
 
 void init(void)
 {
+    breadcrumb_init(cmd_ring_vaddr);
     LOG_VMM("starting \"%s\"\n", microkit_name);
     trace_producer_init(trace_ring_vaddr, CH_TRACER, TRACE_PRODUCER_VMM);
 
@@ -106,7 +108,7 @@ static void heartbeat(void)
                           __atomic_load_n(&ring->tail, __ATOMIC_ACQUIRE));
 }
 
-void notified(microkit_channel ch)
+static void handle_notification(microkit_channel ch)
 {
     notifications++;
     if (ch != CH_UARTRX) {
@@ -114,6 +116,13 @@ void notified(microkit_channel ch)
         return;
     }
     run_commands();
+}
+
+void notified(microkit_channel ch)
+{
+    breadcrumb_enter(VMM_PHASE_NOTIFIED, ch, 0, 0);
+    handle_notification(ch);
+    breadcrumb_leave();
 }
 
 struct vm_fault {
@@ -167,7 +176,7 @@ static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo, s
     return false;
 }
 
-seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
+static seL4_Bool handle_fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
     uint64_t hsr = 0;
     struct guest_fault stop = { .kind = GUEST_FAULT_SMC };
@@ -188,4 +197,12 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
     }
     *reply_msginfo = microkit_msginfo_new(0, 0);
     return seL4_True;
+}
+
+seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
+{
+    breadcrumb_enter(VMM_PHASE_FAULT, microkit_msginfo_get_label(msginfo), microkit_mr_get(0), microkit_mr_get(1));
+    seL4_Bool resume = handle_fault(child, msginfo, reply_msginfo);
+    breadcrumb_leave();
+    return resume;
 }
