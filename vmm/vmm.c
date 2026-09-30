@@ -95,8 +95,20 @@ static void run_commands(void)
     }
 }
 
+/* TODO(will): remove the heartbeat once the WFx-storm deafness is understood */
+static uint64_t notifications;
+
+static void heartbeat(void)
+{
+    struct cmd_ring *ring = (struct cmd_ring *)cmd_ring_vaddr;
+
+    guest_stats_heartbeat(notifications, __atomic_load_n(&ring->head, __ATOMIC_ACQUIRE),
+                          __atomic_load_n(&ring->tail, __ATOMIC_ACQUIRE));
+}
+
 void notified(microkit_channel ch)
 {
+    notifications++;
     if (ch != CH_UARTRX) {
         LOG_VMM_ERR("unexpected notification on channel %u\n", ch);
         return;
@@ -163,6 +175,7 @@ seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo
     bool handled;
 
     guest_stats_count(microkit_msginfo_get_label(msginfo), hsr);
+    heartbeat();
 
     if (is_smc) {
         handled = smc_policy_handle(child, hsr);

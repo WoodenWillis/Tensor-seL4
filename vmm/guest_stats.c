@@ -33,6 +33,7 @@ struct exit_stat {
 };
 
 static struct exit_stat stats[GUEST_EXIT_COUNT];
+static uint64_t last_heartbeat;
 
 static uint64_t read_cntpct(void)
 {
@@ -83,6 +84,7 @@ void guest_stats_reset(void)
     for (int i = 0; i < GUEST_EXIT_COUNT; i++) {
         stats[i] = (struct exit_stat) { 0 };
     }
+    last_heartbeat = read_cntpct();
 }
 
 void guest_stats_count(seL4_Word label, uint64_t hsr)
@@ -112,4 +114,18 @@ void guest_stats_print(void)
     for (int i = 0; i < GUEST_EXIT_COUNT; i++) {
         print_stat(exit_names[i], &stats[i], now, freq);
     }
+}
+
+void guest_stats_heartbeat(uint64_t notifications, uint64_t cmd_head, uint64_t cmd_tail)
+{
+    uint64_t now = read_cntpct();
+
+    if (now - last_heartbeat < read_cntfrq()) {
+        return;
+    }
+    last_heartbeat = now;
+    LOG_VMM("heartbeat: mem %lu smc %lu wfx %lu sysreg %lu vppi %lu maint %lu other %lu | notified %lu | cmd head %lu tail %lu\n",
+            stats[GUEST_EXIT_MEMORY].count, stats[GUEST_EXIT_SMC].count, stats[GUEST_EXIT_WFX].count,
+            stats[GUEST_EXIT_SYSREG].count, stats[GUEST_EXIT_VPPI].count, stats[GUEST_EXIT_VGIC_MAINTENANCE].count,
+            stats[GUEST_EXIT_OTHER].count, notifications, cmd_head, cmd_tail);
 }
