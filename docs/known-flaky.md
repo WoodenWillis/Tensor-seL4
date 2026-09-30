@@ -24,6 +24,8 @@ The kernel took an IRQ exception, but the GIC's acknowledge returned no pending 
 | Still working | uartrx (its warnings print) and the tracer (it prints them). No monitor fault report, so the VMM did not crash |
 | Not yet known | Whether the guest trapped at all; no `trace-dump` was taken |
 
+Seen again at e018e8b (`logs/boot.log`, not committed), this time with the guest's state known. The kernel reached `Run /init as init process`, and the guest then sat at `0xffffffc008fe8c80`, the `wfi` in `cpu_do_idle()`, taking repeated `Spurious interrupt!` exceptions at that PC. `status` 18 s later timed out; `ping` and `trace-dump` still worked (54879 guest records, the last one the `\n` after `TERM=linux`). While idle, the guest traps every `wfi` to the VMM (`HCR_EL2.TWI`), and libvmm replies without advancing the PC. So in this case the VMM was deaf while handling a continuous stream of WFx faults. The heartbeat added in ffcd608 is there to locate it.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
