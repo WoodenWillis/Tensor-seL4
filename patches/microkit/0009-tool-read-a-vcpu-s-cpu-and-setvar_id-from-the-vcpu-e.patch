@@ -1,0 +1,36 @@
+From da7c8bf1b98839ae7e13637869fd44e59e05a38a Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Wed, 30 Sep 2026 08:29:44 -0400
+Subject: [PATCH] tool: read a vcpu's cpu and setvar_id from the vcpu element
+
+The virtual machine parser read the cpu and setvar_id attributes of
+each <vcpu> from its parent <virtual_machine> node instead of the
+<vcpu> element itself. check_attributes() accepts both on <vcpu>, so a
+<vcpu id="0" cpu="3"/> was accepted and then silently ignored, and the
+vCPU ran on the protection domain's core.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CuTDwuvAxZ2dh5tWxWuRxe
+---
+ tool/microkit/src/sdf/pd_vm.rs | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tool/microkit/src/sdf/pd_vm.rs b/tool/microkit/src/sdf/pd_vm.rs
+index 91fd1d6..c0b5353 100644
+--- a/tool/microkit/src/sdf/pd_vm.rs
++++ b/tool/microkit/src/sdf/pd_vm.rs
+@@ -893,9 +893,9 @@ impl VirtualMachine {
+                         }
+                     }
+ 
+-                    let setvar_id = node.attribute("setvar_id").map(ToOwned::to_owned);
++                    let setvar_id = child.attribute("setvar_id").map(ToOwned::to_owned);
+ 
+-                    let cpu = if let Some(cpu_value) = sdf_parse_attribute(xml_sdf, node, "cpu")? {
++                    let cpu = if let Some(cpu_value) = sdf_parse_attribute(xml_sdf, &*child, "cpu")? {
+                         if cpu_value >= config.num_cores {
+                             return Err(value_error(
+                                 xml_sdf,
+-- 
+2.53.0
+

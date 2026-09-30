@@ -8,7 +8,7 @@ patches=$top/patches
 
 declare -A patched_head=(
     [libvmm]=ae52d393e2aaa8a7fc9a75ef39f889e8c31250a2
-    [microkit]=c2ff1944febc3a526dca6d3d7a11ce6ac4ed951a
+    [microkit]=da7c8bf1b98839ae7e13637869fd44e59e05a38a
     [rust-sel4]=49fb1e9d35b9f04a71201383e6839c166c36c501
     [seL4]=c867f3a2734382460a78292251497f001d803de8
 )

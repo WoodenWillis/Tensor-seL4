@@ -26,7 +26,7 @@
         <map mr="console_ring" vaddr="0x40010000" perms="rw" setvar_vaddr="console_ring_vaddr" />
         <map mr="cmd_ring" vaddr="0x40014000" perms="rw" setvar_vaddr="cmd_ring_vaddr" />
         <virtual_machine name=GUEST_NAME>
-            <vcpu id="0" />
+            <vcpu id="0" cpu="3" />
             <map mr="guest_ram" vaddr=STR(GUEST_RAM_GPA) perms="rwx" />
         </virtual_machine>
     </protection_domain>
