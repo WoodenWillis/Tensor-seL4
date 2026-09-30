@@ -16,6 +16,10 @@ MICROKIT_TOOL := $(MICROKIT_SDK)/bin/microkit
 
 SDDF_CUSTOM_LIBC := 1
 
+ifeq ($(filter $(GUEST),harness linux),)
+$(error GUEST must be harness or linux)
+endif
+
 ifeq ($(strip $(CLANG_RESOURCE_DIR)),)
 $(error CLANG_RESOURCE_DIR must be set; run inside the Nix dev shell)
 endif
@@ -34,7 +38,7 @@ CFLAGS := \
 	-I$(SDDF)/include/sddf/util/custom_libc \
 	-I$(SDDF)/include/microkit \
 	-I$(TOP)/include \
-	-I$(TOP)/guests/harness \
+	-I$(TOP)/guests/$(GUEST) \
 	-MD -MP \
 	$(ARCH_FLAGS)
 
@@ -47,7 +51,15 @@ HARNESS_CFLAGS := \
 	-MD -MP \
 	$(ARCH_FLAGS)
 
-VMM_OBJS := vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o images.o
+LINUX_INIT_CFLAGS := \
+	-ffreestanding -nostdlib -fno-pic -mgeneral-regs-only \
+	-O2 -Wall -Werror \
+	$(PREFIX_MAP_CFLAGS) \
+	-MD -MP \
+	$(ARCH_FLAGS)
+
+VMM_OBJS := vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o \
+	guest_image_$(GUEST).o images_$(GUEST).o
 TRACER_OBJS := tracer.o
 UARTRX_OBJS := uartrx.o trace_producer.o
 
@@ -75,14 +87,38 @@ harness/harness.elf: harness/start.o harness/harness.o harness/harness.ld
 harness/harness.bin: harness/harness.elf
 	$(OBJCOPY) -O binary $< $@
 
-harness:
+harness linux:
 	mkdir -p $@
 
-vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o console_putchar.o: %.o: %.c
+linux/init.o: $(TOP)/guests/linux/init.c | linux
+	$(CC) $(LINUX_INIT_CFLAGS) -c -o $@ $<
+
+linux/init.elf: linux/init.o
+	$(LD) -static -e _start $< -o $@
+
+linux/initrd.cpio: linux/init.elf $(TOP)/tools/mkcpio.py
+	python3 $(TOP)/tools/mkcpio.py $< $@
+
+linux/caiman-vm.dts: $(TOP)/guests/linux/caiman-vm.dts.S $(TOP)/guests/linux/guest_map.h linux/initrd.cpio
+	$(CC) -E -P -undef -x assembler-with-cpp -I$(TOP)/guests/linux \
+		-DGUEST_INITRD_SIZE=$$(stat -c%s linux/initrd.cpio) $< -o $@
+
+linux/caiman-vm.dtb: linux/caiman-vm.dts
+	dtc -I dts -O dtb -o $@ $<
+
+vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o \
+	guest_image_$(GUEST).o console_putchar.o: %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-images.o: $(TOP)/vmm/images.S harness/harness.bin
+images_harness.o: $(TOP)/vmm/images_harness.S harness/harness.bin
 	$(CC) -c -x assembler-with-cpp -DGUEST_HARNESS_IMAGE_PATH=\"harness/harness.bin\" $(ARCH_FLAGS) $< -o $@
+
+images_linux.o: $(TOP)/vmm/images_linux.S $(GUEST_KERNEL) linux/caiman-vm.dtb linux/initrd.cpio
+	$(CC) -c -x assembler-with-cpp $(ARCH_FLAGS) \
+		-DGUEST_KERNEL_IMAGE_PATH=\"$(GUEST_KERNEL)\" \
+		-DGUEST_DTB_IMAGE_PATH=\"linux/caiman-vm.dtb\" \
+		-DGUEST_INITRD_IMAGE_PATH=\"linux/initrd.cpio\" \
+		$< -o $@
 
 vmm.elf: $(VMM_OBJS) libvmm.a libsddf_util_console.a
 	$(LD) $(LDFLAGS) $(VMM_OBJS) $(VMM_LIBS) -o $@
@@ -99,8 +135,11 @@ uartrx.o: $(TOP)/uartrx/uartrx.c
 uartrx.elf: $(UARTRX_OBJS) libsddf_util_debug.a
 	$(LD) $(LDFLAGS) $(UARTRX_OBJS) $(TRACER_LIBS) -o $@
 
-loader.img: vmm.elf tracer.elf uartrx.elf $(TOP)/vmm/caiman.system
-	$(MICROKIT_TOOL) $(TOP)/vmm/caiman.system --search-path . --board $(MICROKIT_BOARD) \
+caiman.system: $(TOP)/vmm/caiman.system.S $(TOP)/guests/$(GUEST)/guest_map.h
+	$(CC) -E -P -x c -I$(TOP)/guests/$(GUEST) $< -o $@
+
+loader.img: vmm.elf tracer.elf uartrx.elf caiman.system
+	$(MICROKIT_TOOL) caiman.system --search-path . --board $(MICROKIT_BOARD) \
 		--config $(MICROKIT_CONFIG) -o $@ -r report.txt
 
 include $(LIBVMM)/vmm.mk
@@ -111,4 +150,4 @@ libsddf_util_console.a: $(BASE_OBJS_LIBUTIL) console_putchar.o
 	$(AR) crv $@ $^
 	$(RANLIB) $@
 
--include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) uartrx.d harness/*.d
+-include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) uartrx.d harness/*.d linux/*.d

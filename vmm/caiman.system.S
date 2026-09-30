@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
+#define STR_(x) #x
+#define STR(x) STR_(x)
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
+#include "guest_map.h"
 <system>
-    <memory_region name="guest_ram" size="0x200000" />
+    <memory_region name="guest_ram" size=STR(GUEST_RAM_SIZE) />
+#ifdef GUEST_WATCHDOG_GPA
     <memory_region name="watchdog_cl0" size="0x1000" phys_addr="0x10060000" />
+#endif
     <memory_region name="trace_ring" size="0x10000" />
     <memory_region name="console_ring" size="0x4000" />
     <memory_region name="uartrx_console_ring" size="0x4000" />
@@ -14,13 +19,15 @@
     <protection_domain name="VMM" priority="254" smc="true">
         <program_image path="vmm.elf" />
         <map mr="guest_ram" vaddr="0x20000000" perms="rw" setvar_vaddr="guest_ram_vaddr" />
+#ifdef GUEST_WATCHDOG_GPA
         <map mr="watchdog_cl0" vaddr="0x30000000" perms="r" cached="false" setvar_vaddr="watchdog_cl0_vaddr" />
+#endif
         <map mr="trace_ring" vaddr="0x40000000" perms="rw" setvar_vaddr="trace_ring_vaddr" />
         <map mr="console_ring" vaddr="0x40010000" perms="rw" setvar_vaddr="console_ring_vaddr" />
         <map mr="cmd_ring" vaddr="0x40014000" perms="rw" setvar_vaddr="cmd_ring_vaddr" />
-        <virtual_machine name="harness">
+        <virtual_machine name=GUEST_NAME>
             <vcpu id="0" />
-            <map mr="guest_ram" vaddr="0x80000000" perms="rwx" />
+            <map mr="guest_ram" vaddr=STR(GUEST_RAM_GPA) perms="rwx" />
         </virtual_machine>
     </protection_domain>
 

@@ -9,7 +9,7 @@
 #include <trace/cmd_ring.h>
 #include <trace/trace.h>
 
-#include "harness_map.h"
+#include "guest_map.h"
 #include "exynos_uart_emul.h"
 #include "guest_control.h"
 #include "mmio_forward.h"
@@ -19,15 +19,18 @@
 #include "channels.h"
 
 uintptr_t guest_ram_vaddr;
-uintptr_t watchdog_cl0_vaddr;
 uintptr_t trace_ring_vaddr;
 uintptr_t cmd_ring_vaddr;
 
+#ifdef GUEST_WATCHDOG_GPA
+uintptr_t watchdog_cl0_vaddr;
+
 static struct mmio_forward watchdog_cl0 = {
     .name = "watchdog_cl0",
-    .gpa = HARNESS_WATCHDOG_GPA,
-    .size = HARNESS_WATCHDOG_SIZE,
+    .gpa = GUEST_WATCHDOG_GPA,
+    .size = GUEST_WATCHDOG_SIZE,
 };
+#endif
 
 void init(void)
 {
@@ -38,22 +41,24 @@ void init(void)
         .num_vcpus = 1,
         .num_guest_ram_regions = 1,
         .guest_ram_regions = { (struct guest_ram_region) {
-            .gpa_start = HARNESS_RAM_GPA, .size = HARNESS_RAM_SIZE, .vmm_vaddr = (void *)guest_ram_vaddr } },
+            .gpa_start = GUEST_RAM_GPA, .size = GUEST_RAM_SIZE, .vmm_vaddr = (void *)guest_ram_vaddr } },
     };
 
     if (!guest_init(args)) {
         LOG_VMM_ERR("failed to initialise guest\n");
         return;
     }
-    if (!exynos_uart_emul_init(HARNESS_UART_GPA, HARNESS_UART_SIZE)) {
+    if (!exynos_uart_emul_init(GUEST_UART_GPA, GUEST_UART_SIZE)) {
         LOG_VMM_ERR("failed to register UART emulation\n");
         return;
     }
+#ifdef GUEST_WATCHDOG_GPA
     watchdog_cl0.vmm_vaddr = watchdog_cl0_vaddr;
     if (!mmio_forward_read_only_init(&watchdog_cl0)) {
         LOG_VMM_ERR("failed to register watchdog_cl0 forwarding\n");
         return;
     }
+#endif
     LOG_VMM("guest not started; type guest-start\n");
 }
 

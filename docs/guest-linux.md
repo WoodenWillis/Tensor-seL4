@@ -36,3 +36,22 @@ From its embedded config (`IKCFG_ST`):
 | `ARM_GIC_V3`, `ARM_PSCI_FW` | y | works with libvmm's vGICv3 and emulated PSCI |
 | `MODULE_SIG_FORCE` | not set | vendor modules can be loaded |
 | `VIRTIO_MMIO`, `VIRTIO_CONSOLE` | not set | no virtio console without a module |
+
+## Building
+
+`make GUEST=linux` builds a `build/boot.img` whose VMM boots this kernel. `make` alone still builds the bare-metal harness guest. Each guest has its own build directory (`build/vmm-harness`, `build/vmm-linux`), and both write the same `build/boot.img`, so the image on disk is whichever was built last.
+
+The Linux VM is described in `guests/linux/`:
+
+| | |
+|---|---|
+| Guest RAM | 256 MiB at GPA `0x80000000`, kernel at its start (text_offset 0) |
+| Initramfs | GPA `0x8d000000`: `/dev` (dir), `/dev/console` (c 5,1) and `/init`, built by `tools/mkcpio.py` |
+| DTB | GPA `0x8f000000`, from `caiman-vm.dts.S`, with the initrd bounds filled in from the cpio size |
+| Devices in the DTB | one CPU, PSCI (smc), GICv3 (libvmm vGIC at the physical GIC's addresses), arch timer |
+| UART | no DT node; only `earlycon=exynos4210,mmio32,0x10870000` prints, through the VMM's UART emulation |
+| cmdline | `earlycon=exynos4210,mmio32,0x10870000 keep_bootcon rdinit=/init loglevel=8 nokaslr` |
+
+`/init` (`guests/linux/init.c`) is freestanding and uses raw syscalls: it writes `init: hello from userspace` to fd 1 and then blocks in `ppoll` forever, so the guest stays running until `guest-stop`.
+
+The guest has no device mappings except its RAM. Every other access, and every SMC, traps to the VMM. Whatever the VMM doesn't handle stops the guest and is reported by `status`.

@@ -2,6 +2,7 @@
 
 BOARD := tensor_g4
 CONFIG := smp-debug
+GUEST ?= harness
 
 BUILD := $(abspath build)
 MICROKIT := $(abspath deps/microkit)
@@ -11,7 +12,8 @@ SDK_LOADER = $(SDK)/board/$(BOARD)/$(CONFIG)/elf/loader.elf
 
 DEPS_STAMP := $(BUILD)/deps.stamp
 HELLO := $(BUILD)/hello
-VMM := $(BUILD)/vmm
+VMM := $(BUILD)/vmm-$(GUEST)
+GKI_IMAGE := $(BUILD)/guest/Image
 DEVICE_TXT := hw/dts/caiman-BP1A.250505.005.txt
 DEVICE_DTB := hw/dts/caiman-BP1A.250505.005.dtb
 
@@ -47,11 +49,18 @@ $(HELLO)/loader.img: $(SDK_LOADER)
 	$(MAKE) -C $(MICROKIT)/example/hello BUILD_DIR=$(HELLO) MICROKIT_SDK=$(SDK) \
 		MICROKIT_BOARD=$(BOARD) MICROKIT_CONFIG=$(CONFIG)
 
-$(VMM)/loader.img: $(SDK_LOADER) FORCE
+GUEST_DEPS_harness :=
+GUEST_DEPS_linux := $(GKI_IMAGE)
+
+$(GKI_IMAGE): tools/extract-gki.py
+	python3 tools/extract-gki.py $@
+
+$(VMM)/loader.img: $(SDK_LOADER) $(GUEST_DEPS_$(GUEST)) FORCE
 	mkdir -p $(VMM)
 	tools/gen-trace-stamp.sh $(DEVICE_TXT) $(DEVICE_DTB) flake.lock $(VMM)/trace_stamp.h
 	$(MAKE) -C $(VMM) -f $(CURDIR)/vmm/vmm.mk TOP=$(CURDIR) MICROKIT_SDK=$(SDK) \
 		MICROKIT_BOARD=$(BOARD) MICROKIT_CONFIG=$(CONFIG) \
+		GUEST=$(GUEST) GUEST_KERNEL=$(GKI_IMAGE) \
 		LIBVMM=$(abspath deps/libvmm) SDDF=$(abspath deps/sddf) \
 		PREFIX_MAP_CFLAGS='$(PREFIX_MAP_CFLAGS)'
 

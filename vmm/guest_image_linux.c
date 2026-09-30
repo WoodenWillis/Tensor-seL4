@@ -1,0 +1,40 @@
+/* SPDX-License-Identifier: BSD-2-Clause */
+
+#include <string.h>
+#include <libvmm/libvmm.h>
+#include <sddf/util/cache.h>
+
+#include "guest_map.h"
+#include "guest_image.h"
+
+extern char _guest_kernel_image[];
+extern char _guest_kernel_image_end[];
+extern char _guest_dtb_image[];
+extern char _guest_dtb_image_end[];
+extern char _guest_initrd_image[];
+extern char _guest_initrd_image_end[];
+extern uintptr_t guest_ram_vaddr;
+
+static void zero_guest_ram(void)
+{
+    memset((void *)guest_ram_vaddr, 0, GUEST_RAM_SIZE);
+    cache_clean_and_invalidate(guest_ram_vaddr, guest_ram_vaddr + GUEST_RAM_SIZE);
+}
+
+bool guest_image_load(struct guest_boot *boot)
+{
+    size_t kernel_size = _guest_kernel_image_end - _guest_kernel_image;
+    size_t dtb_size = _guest_dtb_image_end - _guest_dtb_image;
+    size_t initrd_size = _guest_initrd_image_end - _guest_initrd_image;
+
+    zero_guest_ram();
+    uintptr_t pc = linux_setup_images(GUEST_RAM_GPA, (uintptr_t)_guest_kernel_image, kernel_size,
+                                      (uintptr_t)_guest_dtb_image, GUEST_DTB_GPA, dtb_size,
+                                      (uintptr_t)_guest_initrd_image, GUEST_INITRD_GPA, initrd_size);
+    if (pc == 0) {
+        LOG_VMM_ERR("failed to place the Linux images in guest RAM\n");
+        return false;
+    }
+    *boot = (struct guest_boot) { .pc = pc, .dtb = GUEST_DTB_GPA, .initrd = GUEST_INITRD_GPA };
+    return true;
+}

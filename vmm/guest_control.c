@@ -1,19 +1,14 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 
-#include <string.h>
 #include <microkit.h>
 #include <libvmm/libvmm.h>
-#include <sddf/util/cache.h>
 
 #include <trace/trace.h>
 
-#include "harness_map.h"
 #include "guest_control.h"
+#include "guest_image.h"
+#include "guest_map.h"
 #include "trace_producer.h"
-
-extern char _guest_harness_image[];
-extern char _guest_harness_image_end[];
-extern uintptr_t guest_ram_vaddr;
 
 enum guest_state {
     GUEST_NOT_STARTED,
@@ -46,31 +41,19 @@ static void trace_guest_event(uint64_t event, uintptr_t pc)
     trace_emit(&rec);
 }
 
-static bool load_harness(void)
-{
-    size_t size = _guest_harness_image_end - _guest_harness_image;
-
-    if (size == 0 || size > HARNESS_RAM_SIZE) {
-        LOG_VMM_ERR("harness image size 0x%lx does not fit guest RAM 0x%x\n", size, HARNESS_RAM_SIZE);
-        return false;
-    }
-    memset((void *)guest_ram_vaddr, 0, HARNESS_RAM_SIZE);
-    memcpy((void *)guest_ram_vaddr, _guest_harness_image, size);
-    cache_clean_and_invalidate(guest_ram_vaddr, guest_ram_vaddr + HARNESS_RAM_SIZE);
-    return true;
-}
-
 static bool boot_fresh(void)
 {
-    if (!load_harness()) {
+    struct guest_boot boot;
+
+    if (!guest_image_load(&boot)) {
         state = GUEST_START_FAILED;
         return false;
     }
     /* TODO(will): libvmm has no vGIC reset; state from a previous run survives a restart */
     vcpu_reset(GUEST_BOOT_VCPU_ID);
     run++;
-    trace_guest_event(TRACE_GUEST_STARTED, HARNESS_RAM_GPA);
-    if (!guest_start(HARNESS_RAM_GPA, 0, 0)) {
+    trace_guest_event(TRACE_GUEST_STARTED, boot.pc);
+    if (!guest_start(boot.pc, boot.dtb, boot.initrd)) {
         LOG_VMM_ERR("run %lu: failed to start the vCPU\n", run);
         state = GUEST_START_FAILED;
         return false;
@@ -86,7 +69,7 @@ void guest_control_start(void)
         return;
     }
     if (boot_fresh()) {
-        LOG_VMM("run %lu started from a fresh image\n", run);
+        LOG_VMM("run %lu started from a fresh %s image\n", run, GUEST_NAME);
     }
 }
 
