@@ -45,8 +45,14 @@ static bool uart_read(struct exynos_uart_emul *u, size_t vcpu_id, size_t offset,
     uint32_t val;
 
     switch (offset) {
+    case EXYNOS_UART_UFCON:
+        val = EXYNOS_UART_UFCON_FIFOMODE;
+        break;
     case EXYNOS_UART_UTRSTAT:
         val = EXYNOS_UART_UTRSTAT_TXE | EXYNOS_UART_UTRSTAT_TXFE;
+        break;
+    case EXYNOS_UART_UFSTAT:
+        val = 0;
         break;
     default:
         LOG_VMM_ERR("exynos-uart: read of unemulated offset 0x%lx\n", offset);
