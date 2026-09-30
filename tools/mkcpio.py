@@ -21,7 +21,7 @@ def entry(ino, name, mode, data=b"", rdev=(0, 0)):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Build a newc initramfs with /init and /dev/console.")
+    parser = argparse.ArgumentParser(description="Build a newc initramfs with /init, /dev/console and /dev/kmsg.")
     parser.add_argument("init", help="static init executable")
     parser.add_argument("out", help="cpio archive to write")
     args = parser.parse_args()
@@ -31,7 +31,8 @@ def main():
     archive = b"".join([
         entry(1, "dev", S_IFDIR | 0o755),
         entry(2, "dev/console", S_IFCHR | 0o600, rdev=(5, 1)),
-        entry(3, "init", S_IFREG | 0o755, init),
+        entry(3, "dev/kmsg", S_IFCHR | 0o600, rdev=(1, 11)),
+        entry(4, "init", S_IFREG | 0o755, init),
         entry(0, "TRAILER!!!", 0),
     ])
     with open(args.out, "wb") as f:

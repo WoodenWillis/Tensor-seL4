@@ -1,8 +1,14 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 
 /* asm-generic/unistd.h */
+#define SYS_openat 56
 #define SYS_write 64
+#define SYS_exit 93
 #define SYS_ppoll 73
+
+/* uapi/linux/fcntl.h, asm-generic/fcntl.h */
+#define AT_FDCWD (-100)
+#define O_WRONLY 01
 
 void _start(void);
 
@@ -19,9 +25,21 @@ static long syscall5(long nr, long a0, long a1, long a2, long a3, long a4)
     return x0;
 }
 
-static void write_stdout(const char *s, long len)
+static long open_kmsg(void)
 {
-    syscall5(SYS_write, 1, (long)s, len, 0, 0);
+    return syscall5(SYS_openat, AT_FDCWD, (long)"/dev/kmsg", O_WRONLY, 0, 0);
+}
+
+static long write_fd(long fd, const char *s, long len)
+{
+    return syscall5(SYS_write, fd, (long)s, len, 0, 0);
+}
+
+static void exit_on_error(long ret)
+{
+    if (ret < 0) {
+        syscall5(SYS_exit, -ret, 0, 0, 0, 0);
+    }
 }
 
 static void wait_forever(void)
@@ -35,6 +53,9 @@ void _start(void)
 {
     static const char msg[] = "init: hello from userspace\n";
 
-    write_stdout(msg, sizeof(msg) - 1);
+    long kmsg = open_kmsg();
+
+    exit_on_error(kmsg);
+    exit_on_error(write_fd(kmsg, msg, sizeof(msg) - 1));
     wait_forever();
 }

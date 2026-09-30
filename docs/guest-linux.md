@@ -46,7 +46,7 @@ The Linux VM is described in `guests/linux/`:
 | | |
 |---|---|
 | Guest RAM | 256 MiB at GPA `0x80000000`, kernel at its start (text_offset 0) |
-| Initramfs | GPA `0x8d000000`: `/dev` (dir), `/dev/console` (c 5,1) and `/init`, built by `tools/mkcpio.py` |
+| Initramfs | GPA `0x8d000000`: `/dev` (dir), `/dev/console` (c 5,1), `/dev/kmsg` (c 1,11) and `/init`, built by `tools/mkcpio.py` |
 | DTB | GPA `0x8f000000`, from `caiman-vm.dts.S`, with the initrd bounds filled in from the cpio size |
 | Devices in the DTB | one CPU, PSCI (smc), GICv3 (libvmm vGIC at the physical GIC's addresses), arch timer |
 | UART | no DT node; only `earlycon=exynos4210,mmio32,0x10870000` prints, through the VMM's UART emulation |
@@ -64,6 +64,10 @@ The guest reads the real ID registers (seL4 doesn't trap them), but it doesn't g
 | Pointer authentication | `ID_AA64ISAR1_EL1`/`ISAR2_EL1` advertise it; guest log `detected: Address authentication (architected QARMA3 algorithm)` | none | `arm64.nopauth` (`id_aa64isar1.{gpi,gpa,api,apa}=0 id_aa64isar2.{gpa3,apa3}=0`) | Not observed as a trap; added before the guest reached it. seL4's `HCR_VCPU` doesn't set `HCR_EL2.API` or `HCR_EL2.APK`, so the guest's PAuth instructions and key registers would trap. The stock kernel uses PAuth, so this is a real difference from the phone |
 | PSCI | TF-A reports 1.1 | libvmm reports 1.2 | libvmm emulates PSCI for its vCPUs | Guest log `psci: PSCIv1.2 detected in firmware` |
 
-`/init` (`guests/linux/init.c`) is freestanding and uses raw syscalls: it writes `init: hello from userspace` to fd 1 and then blocks in `ppoll` forever, so the guest stays running until `guest-stop`.
+`/init` (`guests/linux/init.c`) is freestanding and uses raw syscalls: it writes `init: hello from userspace` to `/dev/kmsg` and then blocks in `ppoll` forever, so the guest stays running until `guest-stop`. If opening or writing `/dev/kmsg` fails, it exits, so the kernel panics with `Attempted to kill init!` and prints the error rather than going quiet.
+
+It writes to `/dev/kmsg` and not to fd 1 because the kernel's built-in `CONFIG_CMDLINE` (extended, not replaced, by ours) starts with `console=ttynull`. The boot log shows `printk: console [ttynull0] enabled`, so `/dev/console` is the null tty and anything written to it is discarded. The earlycon bootconsole that prints the kernel log (`keep_bootcon`) has no tty. A line written to `/dev/kmsg` becomes a kernel log record and goes out through the bootconsole like any `printk`.
+
+Once `/init` blocks, the kernel has nothing to run and sits in `cpu_do_idle()` (`dsb sy; wfi` at `0xffffffc008fe8c80` in this Image). Every `wfi` traps to the VMM (seL4 sets `HCR_EL2.TWI`/`TWE` for guests), and libvmm answers without advancing the PC, so an idle guest keeps trapping WFI until an interrupt is pending.
 
 The guest has no device mappings except its RAM. Every other access, and every SMC, traps to the VMM. Whatever the VMM doesn't handle stops the guest and is reported by `status`.
