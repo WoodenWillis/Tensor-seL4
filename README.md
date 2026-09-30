@@ -17,7 +17,7 @@ From outside the VM the blob can't see us and it can't lie to us. As far as it k
 
 ## Goal
 
-Give the open source community a controlled, reproducible environment to study what the vendor stack actually does on real Tensor hardware—not what it reports about itself.
+Give the open source community a controlled, reproducible environment to study blob's behaviors for reverse engineering purposes.
 
 ## Target
 
