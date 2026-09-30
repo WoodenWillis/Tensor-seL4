@@ -12,6 +12,7 @@
 #include "guest_map.h"
 #include "exynos_uart_emul.h"
 #include "guest_control.h"
+#include "guest_stats.h"
 #include "mmio_forward.h"
 #include "mmio_trace.h"
 #include "smc_policy.h"
@@ -156,10 +157,12 @@ static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo, s
 
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
-    uint64_t hsr;
+    uint64_t hsr = 0;
     struct guest_fault stop = { .kind = GUEST_FAULT_SMC };
     bool is_smc = smc_fault_hsr(msginfo, &hsr);
     bool handled;
+
+    guest_stats_count(microkit_msginfo_get_label(msginfo), hsr);
 
     if (is_smc) {
         handled = smc_policy_handle(child, hsr);

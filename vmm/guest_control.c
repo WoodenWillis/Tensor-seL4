@@ -9,6 +9,7 @@
 #include "guest_control.h"
 #include "guest_image.h"
 #include "guest_map.h"
+#include "guest_stats.h"
 #include "trace_producer.h"
 
 enum guest_state {
@@ -52,6 +53,7 @@ static bool boot_fresh(void)
     /* TODO(will): libvmm has no vGIC reset; state from a previous run survives a restart */
     vcpu_reset(GUEST_BOOT_VCPU_ID);
     run++;
+    guest_stats_reset();
     trace_guest_event(TRACE_GUEST_STARTED, boot.pc);
     if (!guest_start(boot.pc, boot.dtb, boot.initrd)) {
         LOG_VMM_ERR("run %lu: failed to start the vCPU\n", run);
@@ -116,7 +118,7 @@ void guest_control_status(void)
     switch (state) {
     case GUEST_NOT_STARTED:
         LOG_VMM("guest not started (type guest-start)\n");
-        break;
+        return;
     case GUEST_RUNNING:
         LOG_VMM("guest running (run %lu)\n", run);
         break;
@@ -128,8 +130,9 @@ void guest_control_status(void)
         break;
     case GUEST_START_FAILED:
         LOG_VMM("guest failed to start (run %lu); see the error above\n", run);
-        break;
+        return;
     }
+    guest_stats_print();
 }
 
 void guest_control_fault_stopped(size_t vcpu_id, struct guest_fault fault)

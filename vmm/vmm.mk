@@ -59,7 +59,7 @@ LINUX_INIT_CFLAGS := \
 	$(ARCH_FLAGS)
 
 VMM_OBJS := vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o \
-	guest_image_$(GUEST).o images_$(GUEST).o
+	guest_stats.o guest_image_$(GUEST).o images_$(GUEST).o
 TRACER_OBJS := tracer.o
 UARTRX_OBJS := uartrx.o trace_producer.o
 
@@ -107,7 +107,7 @@ linux/caiman-vm.dtb: linux/caiman-vm.dts
 	dtc -I dts -O dtb -o $@ $<
 
 vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o \
-	guest_image_$(GUEST).o console_putchar.o: %.o: %.c
+	guest_stats.o guest_image_$(GUEST).o console_putchar.o: %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 images_harness.o: $(TOP)/vmm/images_harness.S harness/harness.bin

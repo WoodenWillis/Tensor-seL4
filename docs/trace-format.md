@@ -148,7 +148,7 @@ The VMM no longer starts the guest at boot. It waits for `guest-start`:
 |---|---|---|---|
 | `guest-start` | start run 1 | refused: already running | fresh restart as run N+1 |
 | `guest-stop` | refused, and prints the state | stop the vCPU | refused, and prints the state |
-| `status` | prints the state, run number, and for a fault stop the refused SMC or address and its PC. Changes nothing. | | |
+| `status` | prints the state, run number, and for a fault stop what stopped it (refused SMC, unhandled address, or vCPU exception with its HSR) and its PC. Once a guest has started, it also prints how many times the guest exited to the VMM this run and how long ago the last one was, per kind: memory access, SMC, WFI/WFE, sysreg, virtual-timer injection (VPPI event), vGIC maintenance (the guest's EOIs, from which libvmm acknowledges the timer), and other. The counts are console only; they aren't in the trace. Changes nothing. | | |
 
 Every start is a fresh start, never a resume: guest RAM is zeroed and the image reloaded, the vCPU's EL1 system registers are reset (`vcpu_reset`), and every general register is rewritten. So each run begins from the same state. **Exception:** libvmm cannot reset the virtual GIC, so vGIC state from one run survives into the next. The harness never uses the GIC; this must be fixed before a guest that does.
 - Each non-empty line gets a number (1, 2, 3, …) and a CMD record: ACCEPTED, or REJECTED_VERB for an unknown command, which is answered with `unknown command; type help`.
