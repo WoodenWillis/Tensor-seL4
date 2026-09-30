@@ -3,44 +3,31 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 #include <microkit.h>
 #include <libvmm/libvmm.h>
-#include <sddf/util/cache.h>
+
+#include <trace/cmd_ring.h>
+#include <trace/trace.h>
 
 #include "harness_map.h"
 #include "exynos_uart_emul.h"
+#include "guest_control.h"
 #include "mmio_forward.h"
 #include "mmio_trace.h"
 #include "smc_policy.h"
 #include "trace_producer.h"
 #include "channels.h"
 
-extern char _guest_harness_image[];
-extern char _guest_harness_image_end[];
-
 uintptr_t guest_ram_vaddr;
 uintptr_t watchdog_cl0_vaddr;
 uintptr_t trace_ring_vaddr;
+uintptr_t cmd_ring_vaddr;
 
 static struct mmio_forward watchdog_cl0 = {
     .name = "watchdog_cl0",
     .gpa = HARNESS_WATCHDOG_GPA,
     .size = HARNESS_WATCHDOG_SIZE,
 };
-
-static bool harness_load(void)
-{
-    size_t size = _guest_harness_image_end - _guest_harness_image;
-
-    if (size == 0 || size > HARNESS_RAM_SIZE) {
-        LOG_VMM_ERR("harness image size 0x%lx does not fit guest RAM 0x%x\n", size, HARNESS_RAM_SIZE);
-        return false;
-    }
-    memcpy((void *)guest_ram_vaddr, _guest_harness_image, size);
-    cache_clean_and_invalidate(guest_ram_vaddr, guest_ram_vaddr + size);
-    return true;
-}
 
 void init(void)
 {
@@ -58,9 +45,6 @@ void init(void)
         LOG_VMM_ERR("failed to initialise guest\n");
         return;
     }
-    if (!harness_load()) {
-        return;
-    }
     if (!exynos_uart_emul_init(HARNESS_UART_GPA, HARNESS_UART_SIZE)) {
         LOG_VMM_ERR("failed to register UART emulation\n");
         return;
@@ -70,14 +54,48 @@ void init(void)
         LOG_VMM_ERR("failed to register watchdog_cl0 forwarding\n");
         return;
     }
-    if (!guest_start(HARNESS_RAM_GPA, 0, 0)) {
-        LOG_VMM_ERR("failed to start guest\n");
+    LOG_VMM("guest not started; type guest-start\n");
+}
+
+static void run_command(const struct cmd_entry *cmd)
+{
+    switch (cmd->verb) {
+    case TRACE_CMD_VERB_GUEST_START:
+        guest_control_start();
+        break;
+    case TRACE_CMD_VERB_GUEST_STOP:
+        guest_control_stop();
+        break;
+    case TRACE_CMD_VERB_STATUS:
+        guest_control_status();
+        break;
+    default:
+        LOG_VMM_ERR("command %lu: verb %lu is not a VMM command\n", cmd->id, cmd->verb);
+        break;
+    }
+}
+
+static void run_commands(void)
+{
+    struct cmd_ring *ring = (struct cmd_ring *)cmd_ring_vaddr;
+    uint64_t tail = __atomic_load_n(&ring->tail, __ATOMIC_RELAXED);
+
+    while (tail != __atomic_load_n(&ring->head, __ATOMIC_ACQUIRE)) {
+        const struct cmd_entry *cmd = &ring->entries[tail % CMD_RING_CAPACITY];
+        run_command(cmd);
+        __atomic_store_n(&ring->completed_id, cmd->id, __ATOMIC_RELEASE);
+        tail++;
+        __atomic_store_n(&ring->tail, tail, __ATOMIC_RELEASE);
     }
 }
 
 void notified(microkit_channel ch)
 {
-    LOG_VMM_ERR("unexpected notification on channel %u\n", ch);
+    if (ch != CH_UARTRX) {
+        LOG_VMM_ERR("unexpected notification on channel %u\n", ch);
+        return;
+    }
+    run_commands();
 }
 
 struct vm_fault {
@@ -99,10 +117,11 @@ static struct vm_fault vm_fault_save(microkit_msginfo msginfo)
     return f;
 }
 
-static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo)
+static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo, uintptr_t *fault_addr)
 {
     struct vm_fault f = vm_fault_save(msginfo);
 
+    *fault_addr = f.addr;
     if (fault_handle(child, msginfo)) {
         return true;
     }
@@ -115,16 +134,17 @@ static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo)
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
     uint64_t hsr;
+    uintptr_t fault_addr = 0;
+    bool is_smc = smc_fault_hsr(msginfo, &hsr);
     bool handled;
 
-    if (smc_fault_hsr(msginfo, &hsr)) {
+    if (is_smc) {
         handled = smc_policy_handle(child, hsr);
     } else {
-        handled = guest_fault_handle(child, msginfo);
+        handled = guest_fault_handle(child, msginfo, &fault_addr);
     }
     if (!handled) {
-        microkit_vcpu_stop(child);
-        LOG_VMM_ERR("guest stopped: fault not handled\n");
+        guest_control_fault_stopped(child, is_smc, fault_addr);
         return seL4_False;
     }
     *reply_msginfo = microkit_msginfo_new(0, 0);

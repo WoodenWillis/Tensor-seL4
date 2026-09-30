@@ -4,8 +4,8 @@
 
 #include <stdint.h>
 
-/* docs/trace-format.md, version 2 */
-#define TRACE_VERSION               2
+/* docs/trace-format.md, version 3 */
+#define TRACE_VERSION               3
 #define TRACE_MAGIC                 "SEL4TRC"
 #define TRACE_RECORD_SIZE           64
 #define TRACE_HEADER_SIZE           336
@@ -19,6 +19,7 @@
 #define TRACE_KIND_SMC_REGS         3
 #define TRACE_KIND_SMC_EXIT         4
 #define TRACE_KIND_CMD              5
+#define TRACE_KIND_GUEST            6
 
 #define TRACE_MMIO_WRITE            (1u << 0)
 #define TRACE_MMIO_FORWARDED        (1u << 1)
@@ -35,6 +36,13 @@
 #define TRACE_CMD_VERB_PING         1
 #define TRACE_CMD_VERB_TRACE_DUMP   2
 #define TRACE_CMD_VERB_HELP         3
+#define TRACE_CMD_VERB_GUEST_START  4
+#define TRACE_CMD_VERB_GUEST_STOP   5
+#define TRACE_CMD_VERB_STATUS       6
+
+#define TRACE_GUEST_STARTED             1
+#define TRACE_GUEST_STOPPED_BY_COMMAND  2
+#define TRACE_GUEST_STOPPED_BY_FAULT    3
 
 #define TRACE_PRODUCER_VMM          0
 #define TRACE_PRODUCER_UARTRX       1

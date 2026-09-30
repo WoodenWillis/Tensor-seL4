@@ -1,6 +1,6 @@
 # Trace format
 
-Current version: **2**. Changing anything below is a breaking change: bump the version, and keep the old decoder working. The decoder (`tools/trace-decode.py`) reads versions 0, 1 and 2.
+Current version: **3**. Changing anything below is a breaking change: bump the version, and keep the old decoder working. The decoder (`tools/trace-decode.py`) reads versions 0 to 3.
 
 Definitions: `include/trace/trace.h` (C) and `tools/trace-decode.py` (host decoder). All integers are little-endian.
 
@@ -17,8 +17,8 @@ A dump is written to the serial console with `microkit_dbg_puts`. That output ex
 
 | Prefix | Payload | Meaning |
 |---|---|---|
-| `TRH2 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
-| `TRC2 ` | 128 lowercase hex characters (64 bytes) | One record. |
+| `TRH3 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
+| `TRC3 ` | 128 lowercase hex characters (64 bytes) | One record. |
 
 The header is repeated because it's the one line whose loss would make the whole trace undecodable. Kernel debug output isn't serialised across cores. On the first v2 boot, the monitor's `MON|INFO: Microkit Monitor started!` on core 0 interleaved character by character with the tracer's first header on core 1. The decoder uses the first valid header copy, holds any records that arrive before it, and treats a later copy that differs as an error.
 
@@ -56,7 +56,7 @@ Every record has the same layout. How `addr`, `value`, `size` and `flags` are in
 | 40 | 4 | esr | Syndrome (ESR_EL2) as delivered by seL4 |
 | 44 | 2 | vcpu | vCPU ID within the producer's VM |
 | 46 | 1 | producer | Who produced the record: 0 the VMM, 1 `uartrx` (host commands) |
-| 47 | 1 | kind | 1 MMIO, 2 SMC_ENTER, 3 SMC_REGS, 4 SMC_EXIT, 5 CMD |
+| 47 | 1 | kind | 1 MMIO, 2 SMC_ENTER, 3 SMC_REGS, 4 SMC_EXIT, 5 CMD, 6 GUEST |
 | 48 | 1 | size | Depends on kind |
 | 49 | 1 | flags | Depends on kind |
 | 50 | 14 | reserved | 0 |
@@ -89,11 +89,23 @@ One non-empty command line typed on the console (see "Host commands" below). Pro
 
 | Field | Contents |
 |---|---|
-| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help` |
+| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status` |
 | value | The line's number: 1 for the first command typed after boot, then 2, 3, … |
 | flags | Bit 0 ACCEPTED. Bit 2 REJECTED_VERB (unknown command). Exactly one is set. Bit 1 is unused. |
 
 Empty lines produce no record.
+
+### kind 6: GUEST
+
+A change in the guest's lifecycle, produced by the VMM. It marks where one run ends and the next begins, so several runs in one boot can be told apart in a dump.
+
+| Field | Contents |
+|---|---|
+| addr | Event: 1 STARTED, 2 STOPPED_BY_COMMAND, 3 STOPPED_BY_FAULT |
+| value | Run number: 1 for the first `guest-start` after boot, incremented on each start |
+| pc | STARTED: the entry point. STOPPED_BY_FAULT: the PC of the refused access or SMC. STOPPED_BY_COMMAND: 0. |
+
+STARTED is recorded before the vCPU runs, so it precedes every record of that run. A refused command (`guest-start` while running, `guest-stop` while stopped) produces only its CMD record, so a trace shows it had no effect.
 
 ### SMC policy (`vmm/smc_policy.c`)
 
@@ -121,13 +133,24 @@ Empty lines produce no record.
 | 0 | MMIO records only (kind 1). Lines `TRH0` / `TRC0`. |
 | 1 | Adds SMC_ENTER, SMC_REGS and SMC_EXIT (kinds 2–4). The record and header layouts are unchanged. Lines `TRH1` / `TRC1`. |
 | 2 | Adds CMD (kind 5) and a second producer (`uartrx`, producer 1). Layouts unchanged. Lines `TRH2` / `TRC2`. |
+| 3 | Adds GUEST (kind 6) and the guest-control verbs 4–6. Layouts unchanged. Lines `TRH3` / `TRC3`. |
 
 ## Host commands
 
 `uartrx` is a small typed console on the same UART. It polls the receive FIFO, maps the UART read-only and touches only the receive registers.
 
 - Type a command and press Enter. CR, LF and CRLF all end a line. Backspace works, and what you type is echoed. A `> ` prompt means it's ready.
-- Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive).
+- Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive), and the guest controls below. Guest commands are run by the VMM; the prompt comes back when the VMM has finished, or after 2 s with a warning.
+
+The VMM no longer starts the guest at boot. It waits for `guest-start`:
+
+| Command | not started | running | stopped (by command, by fault, or failed to start) |
+|---|---|---|---|
+| `guest-start` | start run 1 | refused: already running | fresh restart as run N+1 |
+| `guest-stop` | refused, and prints the state | stop the vCPU | refused, and prints the state |
+| `status` | prints the state, run number, and for a fault stop the refused SMC or address and its PC. Changes nothing. | | |
+
+Every start is a fresh start, never a resume: guest RAM is zeroed and the image reloaded, the vCPU's EL1 system registers are reset (`vcpu_reset`), and every general register is rewritten. So each run begins from the same state. **Exception:** libvmm cannot reset the virtual GIC, so vGIC state from one run survives into the next. The harness never uses the GIC; this must be fixed before a guest that does.
 - Each non-empty line gets a number (1, 2, 3, …) and a CMD record: ACCEPTED, or REJECTED_VERB for an unknown command, which is answered with `unknown command; type help`.
 - If the UART reported receive errors while a line was typed, `UARTRX|WARN: receive errors on this line, UERSTAT …` is printed first. Bits: 0x1 overrun, 0x2 parity, 0x4 framing, 0x8 break.
 

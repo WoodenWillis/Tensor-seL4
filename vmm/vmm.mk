@@ -47,7 +47,7 @@ HARNESS_CFLAGS := \
 	-MD -MP \
 	$(ARCH_FLAGS)
 
-VMM_OBJS := vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o images.o
+VMM_OBJS := vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o images.o
 TRACER_OBJS := tracer.o
 UARTRX_OBJS := uartrx.o trace_producer.o
 
@@ -78,7 +78,7 @@ harness/harness.bin: harness/harness.elf
 harness:
 	mkdir -p $@
 
-vmm.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o console_putchar.o: %.o: %.c
+vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o console_putchar.o: %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 images.o: $(TOP)/vmm/images.S harness/harness.bin

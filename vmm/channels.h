@@ -3,3 +3,4 @@
 #pragma once
 
 #define CH_TRACER 1
+#define CH_UARTRX 2

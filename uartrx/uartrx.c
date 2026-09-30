@@ -6,6 +6,7 @@
 #include <microkit.h>
 
 #include <hw/exynos_uart.h>
+#include <trace/cmd_ring.h>
 #include <trace/console_ring.h>
 #include <trace/trace.h>
 #include <trace/trace_archive.h>
@@ -13,6 +14,9 @@
 #include "trace_producer.h"
 
 #define TRACER_CH 1
+#define VMM_CH 2
+
+#define VMM_REPLY_TIMEOUT_MS 2000
 
 #define LINE_MAX 128
 
@@ -23,6 +27,7 @@ uintptr_t uart_vaddr;
 uintptr_t trace_ring_vaddr;
 uintptr_t console_ring_vaddr;
 uintptr_t trace_control_vaddr;
+uintptr_t cmd_ring_vaddr;
 
 static char line[LINE_MAX];
 static size_t line_len;
@@ -66,6 +71,19 @@ static void console_puthex32(uint32_t val)
     for (int shift = 28; shift >= 0; shift -= 4) {
         console_putc("0123456789abcdef"[(val >> shift) & 0xf]);
     }
+}
+
+static void console_putdec(uint64_t val)
+{
+    char buf[21];
+    int pos = sizeof(buf) - 1;
+
+    buf[pos] = '\0';
+    do {
+        buf[--pos] = (char)('0' + val % 10);
+        val /= 10;
+    } while (val != 0);
+    console_puts(&buf[pos]);
 }
 
 static void prompt(void)
@@ -123,20 +141,68 @@ static size_t token_len(const char *s, size_t len)
     return n;
 }
 
-static void cmd_help(void)
+static void cmd_help(uint64_t id, uint64_t verb)
 {
     console_puts("commands:\n");
-    console_puts("  help        this list\n");
-    console_puts("  ping        answers pong\n");
-    console_puts("  trace-dump  print every trace record recorded so far\n");
+    console_puts("  help         this list\n");
+    console_puts("  ping         answers pong\n");
+    console_puts("  trace-dump   print every trace record recorded so far\n");
+    console_puts("  guest-start  start the guest from a fresh image (refused while it runs)\n");
+    console_puts("  guest-stop   stop the running guest (refused if none is running)\n");
+    console_puts("  status       show whether the guest is running, and why it stopped\n");
 }
 
-static void cmd_ping(void)
+static void cmd_ping(uint64_t id, uint64_t verb)
 {
     console_puts("pong\n");
 }
 
-static void cmd_trace_dump(void)
+static uint64_t read_cntpct(void)
+{
+    uint64_t val;
+    asm volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(val));
+    return val;
+}
+
+static uint64_t read_cntfrq(void)
+{
+    uint64_t val;
+    asm volatile("mrs %0, cntfrq_el0" : "=r"(val));
+    return val;
+}
+
+static bool wait_for_vmm(struct cmd_ring *ring, uint64_t id)
+{
+    uint64_t deadline = read_cntpct() + read_cntfrq() / 1000 * VMM_REPLY_TIMEOUT_MS;
+
+    while (__atomic_load_n(&ring->completed_id, __ATOMIC_ACQUIRE) < id) {
+        if (read_cntpct() > deadline) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void cmd_to_vmm(uint64_t id, uint64_t verb)
+{
+    struct cmd_ring *ring = (struct cmd_ring *)cmd_ring_vaddr;
+    uint64_t head = __atomic_load_n(&ring->head, __ATOMIC_RELAXED);
+
+    if (head - __atomic_load_n(&ring->tail, __ATOMIC_ACQUIRE) >= CMD_RING_CAPACITY) {
+        console_puts("UARTRX|ERROR: the VMM has too many commands queued; command dropped\n");
+        return;
+    }
+    ring->entries[head % CMD_RING_CAPACITY] = (struct cmd_entry) { .id = id, .verb = verb };
+    __atomic_store_n(&ring->head, head + 1, __ATOMIC_RELEASE);
+    microkit_notify(VMM_CH);
+    if (!wait_for_vmm(ring, id)) {
+        console_puts("UARTRX|WARN: the VMM did not finish command ");
+        console_putdec(id);
+        console_puts(" within 2 s\n");
+    }
+}
+
+static void cmd_trace_dump(uint64_t id, uint64_t verb)
 {
     struct trace_control *control = (struct trace_control *)trace_control_vaddr;
 
@@ -147,13 +213,16 @@ static void cmd_trace_dump(void)
 struct command {
     const char *name;
     uint64_t verb;
-    void (*run)(void);
+    void (*run)(uint64_t id, uint64_t verb);
 };
 
 static const struct command commands[] = {
     { "help", TRACE_CMD_VERB_HELP, cmd_help },
     { "ping", TRACE_CMD_VERB_PING, cmd_ping },
     { "trace-dump", TRACE_CMD_VERB_TRACE_DUMP, cmd_trace_dump },
+    { "guest-start", TRACE_CMD_VERB_GUEST_START, cmd_to_vmm },
+    { "guest-stop", TRACE_CMD_VERB_GUEST_STOP, cmd_to_vmm },
+    { "status", TRACE_CMD_VERB_STATUS, cmd_to_vmm },
 };
 
 static const struct command *lookup(const char *verb, size_t len)
@@ -209,7 +278,7 @@ static void run_line(const char *s, size_t len)
         return;
     }
     record_command(cmd->verb, id, TRACE_CMD_ACCEPTED);
-    cmd->run();
+    cmd->run(id, cmd->verb);
 }
 
 static void end_line(void)

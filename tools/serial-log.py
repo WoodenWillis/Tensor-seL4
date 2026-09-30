@@ -33,6 +33,8 @@ def summarise(td, line):
         return f"[trace] bad record: {e}"
     if rec["kind"] == td.KIND_CMD:
         return f"[trace] {td.format_cmd(rec)}"
+    if rec["kind"] == td.KIND_GUEST:
+        return f"[trace] {td.format_guest(rec)}"
     if rec["kind"] == td.KIND_MMIO and rec["flags"] & td.MMIO_UNHANDLED:
         return f"[trace] {td.format_record(rec)}"
     if rec["kind"] == td.KIND_SMC_EXIT and rec["flags"] & td.SMC_UNHANDLED:
