@@ -104,33 +104,51 @@ void notified(microkit_channel ch)
 }
 
 struct vm_fault {
-    bool is_vm_fault;
+    seL4_Word label;
     uintptr_t pc;
     uintptr_t addr;
     size_t fsr;
+    uint64_t hsr;
 };
 
 static struct vm_fault vm_fault_save(microkit_msginfo msginfo)
 {
-    struct vm_fault f = { .is_vm_fault = microkit_msginfo_get_label(msginfo) == seL4_Fault_VMFault };
+    struct vm_fault f = { .label = microkit_msginfo_get_label(msginfo) };
 
-    if (f.is_vm_fault) {
+    switch (f.label) {
+    case seL4_Fault_VMFault:
         f.pc = microkit_mr_get(seL4_VMFault_IP);
         f.addr = microkit_mr_get(seL4_VMFault_Addr);
         f.fsr = microkit_mr_get(seL4_VMFault_FSR);
+        break;
+    case seL4_Fault_VCPUFault:
+        f.hsr = microkit_mr_get(seL4_VCPUFault_HSR);
+        break;
     }
     return f;
 }
 
-static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo, uintptr_t *fault_addr)
+static struct guest_fault guest_fault_of(const struct vm_fault *f)
+{
+    switch (f->label) {
+    case seL4_Fault_VMFault:
+        return (struct guest_fault) { .kind = GUEST_FAULT_MEMORY, .detail = f->addr };
+    case seL4_Fault_VCPUFault:
+        return (struct guest_fault) { .kind = GUEST_FAULT_VCPU, .detail = f->hsr };
+    default:
+        return (struct guest_fault) { .kind = GUEST_FAULT_OTHER, .detail = f->label };
+    }
+}
+
+static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo, struct guest_fault *stop)
 {
     struct vm_fault f = vm_fault_save(msginfo);
 
-    *fault_addr = f.addr;
+    *stop = guest_fault_of(&f);
     if (fault_handle(child, msginfo)) {
         return true;
     }
-    if (f.is_vm_fault) {
+    if (f.label == seL4_Fault_VMFault) {
         mmio_trace_unhandled(child, f.pc, f.addr, f.fsr);
     }
     return false;
@@ -139,17 +157,17 @@ static bool guest_fault_handle(microkit_child child, microkit_msginfo msginfo, u
 seL4_Bool fault(microkit_child child, microkit_msginfo msginfo, microkit_msginfo *reply_msginfo)
 {
     uint64_t hsr;
-    uintptr_t fault_addr = 0;
+    struct guest_fault stop = { .kind = GUEST_FAULT_SMC };
     bool is_smc = smc_fault_hsr(msginfo, &hsr);
     bool handled;
 
     if (is_smc) {
         handled = smc_policy_handle(child, hsr);
     } else {
-        handled = guest_fault_handle(child, msginfo, &fault_addr);
+        handled = guest_fault_handle(child, msginfo, &stop);
     }
     if (!handled) {
-        guest_control_fault_stopped(child, is_smc, fault_addr);
+        guest_control_fault_stopped(child, stop);
         return seL4_False;
     }
     *reply_msginfo = microkit_msginfo_new(0, 0);

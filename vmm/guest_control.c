@@ -2,6 +2,7 @@
 
 #include <microkit.h>
 #include <libvmm/libvmm.h>
+#include <libvmm/arch/aarch64/hsr.h>
 
 #include <trace/trace.h>
 
@@ -20,8 +21,7 @@ enum guest_state {
 
 struct fault_stop {
     uintptr_t pc;
-    bool is_smc;
-    uint64_t detail;
+    struct guest_fault fault;
 };
 
 static enum guest_state state = GUEST_NOT_STARTED;
@@ -89,12 +89,25 @@ void guest_control_stop(void)
 
 static void print_fault_stop(void)
 {
-    if (last_fault.is_smc) {
+    uint64_t detail = last_fault.fault.detail;
+
+    switch (last_fault.fault.kind) {
+    case GUEST_FAULT_SMC:
         LOG_VMM("guest stopped by fault (run %lu): SMC 0x%lx refused by policy at pc 0x%lx\n", run,
-                last_fault.detail, last_fault.pc);
-    } else {
+                detail, last_fault.pc);
+        break;
+    case GUEST_FAULT_MEMORY:
         LOG_VMM("guest stopped by fault (run %lu): unhandled access to 0x%lx at pc 0x%lx\n", run,
-                last_fault.detail, last_fault.pc);
+                detail, last_fault.pc);
+        break;
+    case GUEST_FAULT_VCPU:
+        LOG_VMM("guest stopped by fault (run %lu): unhandled vCPU exception EC 0x%lx (HSR 0x%lx) at pc 0x%lx\n",
+                run, HSR_EXCEPTION_CLASS(detail), detail, last_fault.pc);
+        break;
+    case GUEST_FAULT_OTHER:
+        LOG_VMM("guest stopped by fault (run %lu): unhandled seL4 fault label %lu at pc 0x%lx\n", run,
+                detail, last_fault.pc);
+        break;
     }
 }
 
@@ -119,7 +132,7 @@ void guest_control_status(void)
     }
 }
 
-void guest_control_fault_stopped(size_t vcpu_id, bool is_smc, uintptr_t fault_addr)
+void guest_control_fault_stopped(size_t vcpu_id, struct guest_fault fault)
 {
     seL4_UserContext regs = { 0 };
     seL4_Error err = seL4_TCB_ReadRegisters(BASE_VM_TCB_CAP + vcpu_id, false, 0, SEL4_USER_CONTEXT_SIZE, &regs);
@@ -129,11 +142,10 @@ void guest_control_fault_stopped(size_t vcpu_id, bool is_smc, uintptr_t fault_ad
     }
     microkit_vcpu_stop(vcpu_id);
     vcpu_set_on(vcpu_id, false);
-    last_fault = (struct fault_stop) {
-        .pc = regs.pc,
-        .is_smc = is_smc,
-        .detail = is_smc ? regs.x0 : fault_addr,
-    };
+    if (fault.kind == GUEST_FAULT_SMC) {
+        fault.detail = regs.x0;
+    }
+    last_fault = (struct fault_stop) { .pc = regs.pc, .fault = fault };
     state = GUEST_STOPPED_BY_FAULT;
     trace_guest_event(TRACE_GUEST_STOPPED_BY_FAULT, regs.pc);
     print_fault_stop();
