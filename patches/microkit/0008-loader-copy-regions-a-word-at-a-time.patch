@@ -1,0 +1,108 @@
+From c2ff1944febc3a526dca6d3d7a11ce6ac4ed951a Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Wed, 30 Sep 2026 03:53:45 -0400
+Subject: [PATCH] loader: copy regions a word at a time
+
+The loader copies every region with the MMU off, so each access is
+Device-nGnRnE and costs a full bus transaction. With a byte-at-a-time
+memcpy, caiman spent about 45 s on one 35 MiB region (a VMM with a
+Linux kernel image embedded in it).
+
+memcpy now copies 8 bytes per access when source and destination are
+equally aligned modulo 8, 4 bytes when they are equally aligned modulo
+4, and falls back to bytes otherwise, with byte copies for the
+unaligned head and the tail. Every wide access is naturally aligned,
+which Device memory and -mstrict-align both require. On caiman the
+large region's source and destination differ modulo 8 but not modulo
+4, so it now moves in 4-byte words.
+
+Forward copies still read each word before writing it, so memmove's
+overlapping forward case keeps working.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CuTDwuvAxZ2dh5tWxWuRxe
+---
+ loader/src/cutil.c | 62 +++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 58 insertions(+), 4 deletions(-)
+
+diff --git a/loader/src/cutil.c b/loader/src/cutil.c
+index e04d49e..f1a3589 100644
+--- a/loader/src/cutil.c
++++ b/loader/src/cutil.c
+@@ -5,15 +5,69 @@
+  * SPDX-License-Identifier: BSD-2-Clause
+  */
+ 
++#include <stdint.h>
++
+ #include "cutil.h"
+ 
+-void *memcpy(void *dst, const void *src, size_t sz)
++static size_t copy_width(const char *dst, const char *src)
++{
++    uintptr_t misalign = (uintptr_t)dst ^ (uintptr_t)src;
++
++    if ((misalign & 7) == 0) {
++        return 8;
++    }
++    if ((misalign & 3) == 0) {
++        return 4;
++    }
++    return 1;
++}
++
++static void copy_bytes(char *dst, const char *src, size_t sz)
+ {
+-    char *dst_ = dst;
+-    const char *src_ = src;
+     while (sz-- > 0) {
+-        *dst_++ = *src_++;
++        *dst++ = *src++;
++    }
++}
++
++static void copy_words64(uint64_t *dst, const uint64_t *src, size_t n)
++{
++    while (n-- > 0) {
++        *dst++ = *src++;
++    }
++}
++
++static void copy_words32(uint32_t *dst, const uint32_t *src, size_t n)
++{
++    while (n-- > 0) {
++        *dst++ = *src++;
++    }
++}
++
++void *memcpy(void *dst, const void *src, size_t sz)
++{
++    char *d = dst;
++    const char *s = src;
++    size_t width = copy_width(d, s);
++    size_t head = (width - ((uintptr_t)d & (width - 1))) & (width - 1);
++
++    if (width == 1 || sz < head + width) {
++        copy_bytes(d, s, sz);
++        return dst;
++    }
++    copy_bytes(d, s, head);
++    d += head;
++    s += head;
++    sz -= head;
++
++    size_t words = sz / width;
++    if (width == 8) {
++        copy_words64((uint64_t *)d, (const uint64_t *)s, words);
++    } else {
++        copy_words32((uint32_t *)d, (const uint32_t *)s, words);
+     }
++    d += words * width;
++    s += words * width;
++    copy_bytes(d, s, sz - words * width);
+ 
+     return dst;
+ }
+-- 
+2.53.0
+
