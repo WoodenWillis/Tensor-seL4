@@ -37,3 +37,22 @@ The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest s
 | Before it | Several `<<seL4(CPU 0) [checkInterrupt/59 ...]: Spurious interrupt!>>` lines while the guest ran, with the current thread `linux` or `VMM` |
 
 Echo goes uartrx (CPU 2) → tracer (CPU 1) → `seL4_DebugPutChar` and doesn't involve CPU 0, so CPUs 1 and 2 stopped making progress too. One explanation that fits, not yet tested: CPU 0 stuck while holding the kernel lock. Not yet explained.
+
+## Linux guest: goes silent mid-boot while the rest of the system runs
+
+| | |
+|---|---|
+| First seen | 2026-09-30, at 0b90826 plus `arm64.nopauth` (trace stamp `0b9082623b6d-dirty`) |
+| Build | as above |
+| Occurrences | 1 of 8 Linux guest boots |
+| Symptom | Last guest line `[    0.464540][    T1] kvm [1]: HYP mode not available`. `Trying to unpack rootfs image as initramfs...` (T8) never reports finishing |
+| Still working | uartrx (`ping` answered `pong`) and the tracer (`trace-dump` printed 41827 records, 0 not archived, 0 decode errors) |
+| Not yet known | Whether the VMM still answered; no `status` was sent |
+
+What the trace shows:
+
+- The guest trapped 41824 times in 0.887 s after `GUEST STARTED`: 13925 characters through the emulated UART (UFCON read, UFSTAT read, UTXH write each) and 8 SMCs, all PSCI and all emulated.
+- The last guest record is the UTXH write of the `\n` that ends the `kvm` line. Nothing from the guest in the 11.0 s before `ping`.
+- No refusal and no UNHANDLED record, so the VMM didn't stop the guest.
+
+The trace doesn't record WFI/WFE traps or virtual interrupt delivery, so it can't tell a guest spinning at EL1 apart from a guest idling in WFI and waiting for an interrupt that never arrives.
