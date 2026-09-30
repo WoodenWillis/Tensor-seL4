@@ -50,7 +50,7 @@
     };
 
     chosen {
-        bootargs = "earlycon=exynos4210,mmio32,0x10870000 keep_bootcon rdinit=/init loglevel=8 nokaslr arm64.nosve arm64.nomte";
+        bootargs = "earlycon=exynos4210,mmio32,0x10870000 keep_bootcon rdinit=/init loglevel=8 nokaslr arm64.nosve arm64.nosme arm64.nomte arm64.nopauth";
         linux,initrd-start = <0x0 GUEST_INITRD_GPA>;
         linux,initrd-end = <0x0 (GUEST_INITRD_GPA + GUEST_INITRD_SIZE)>;
     };
