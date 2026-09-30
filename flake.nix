@@ -63,6 +63,7 @@
               pkgs.qemu
               pkgs.android-tools
               pkgs.picocom
+              pkgs.lz4
               pkgs.llvmPackages_18.clang-unwrapped
               pkgs.llvmPackages_18.lld
               pkgs.llvmPackages_18.llvm
