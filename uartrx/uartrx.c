@@ -6,6 +6,7 @@
 #include <microkit.h>
 
 #include <hw/exynos_uart.h>
+#include <hw/zumapro_coresight.h>
 #include <trace/cmd_ring.h>
 #include <trace/console_ring.h>
 #include <trace/trace.h>
@@ -160,6 +161,7 @@ static void cmd_help(uint64_t id, uint64_t verb)
     console_puts("  status       show whether the guest is running, and why it stopped\n");
     console_puts("  guest-regs   print the guest vCPU's registers (stalls the vCPU's core)\n");
     console_puts("  gic-dump     print every core's GIC redistributor state (debug kernel)\n");
+    console_puts("  pc-sample    sample every core's PC, EL and security state via CoreSight\n");
 }
 
 static void cmd_ping(uint64_t id, uint64_t verb)
@@ -251,6 +253,70 @@ static void cmd_to_vmm(uint64_t id, uint64_t verb)
     }
 }
 
+static uint32_t cs_read(uintptr_t base, uint32_t offset)
+{
+    return *(volatile uint32_t *)(base + offset);
+}
+
+static void cs_write(uintptr_t base, uint32_t offset, uint32_t val)
+{
+    *(volatile uint32_t *)(base + offset) = val;
+}
+
+static uint64_t cs_read64(uintptr_t base, uint32_t offset)
+{
+    return *(volatile uint64_t *)(base + offset);
+}
+
+static void pc_sample_line(uint32_t core, uint64_t pcsr)
+{
+    console_puts("  core ");
+    console_putdec(core);
+    console_puts(" PMUPCSR ");
+    console_puthex64(pcsr);
+    console_puts(" ns ");
+    console_putdec(CS_PCSR_NS(pcsr));
+    console_puts(" el ");
+    console_putdec(CS_PCSR_EL(pcsr));
+    console_puts("\n");
+}
+
+static void pc_sample_core(uint32_t core)
+{
+    uintptr_t dbg = CS_DBG_VADDR(core);
+    uintptr_t pmu = CS_PMU_VADDR(core);
+    uint32_t prsr = cs_read(dbg, CS_DBGPRSR);
+
+    console_puts("core ");
+    console_putdec(core);
+    console_puts(": DBGPRSR ");
+    console_puthex32(prsr);
+    console_puts(" MIDR ");
+    console_puthex32(cs_read(dbg, CS_MIDR));
+    console_puts("\n");
+    if (!(prsr & CS_PRSR_POWER_UP) || (prsr & CS_PRSR_RESET_STATE)) {
+        console_puts("  powered down or in reset; not sampled\n");
+        return;
+    }
+    cs_write(dbg, CS_DBGLAR, CS_OSLOCK_MAGIC);
+    cs_write(dbg, CS_DBGOSLAR, 0);
+    cs_write(pmu, CS_DBGLAR, CS_OSLOCK_MAGIC);
+    for (uint32_t i = 0; i < CS_PCSR_SAMPLES; i++) {
+        (void)cs_read64(pmu, CS_PMUPCSR);
+        pc_sample_line(core, cs_read64(pmu, CS_PMUPCSR));
+    }
+    cs_write(pmu, CS_DBGLAR, CS_LOCK);
+}
+
+/* TODO(will): remove pc-sample with gic-dump once the wedged-core problem is understood */
+static void cmd_pc_sample(uint64_t id, uint64_t verb)
+{
+    console_puts("sampling every core's PC through CoreSight (exynos-coresight sequence)\n");
+    for (uint32_t core = 0; core < CS_NUM_CORES; core++) {
+        pc_sample_core(core);
+    }
+}
+
 static void cmd_gic_dump(uint64_t id, uint64_t verb)
 {
     console_puts("dumping GIC state; the kernel prints it directly\n");
@@ -281,6 +347,7 @@ static const struct command commands[] = {
     { "status", TRACE_CMD_VERB_STATUS, cmd_to_vmm },
     { "guest-regs", TRACE_CMD_VERB_GUEST_REGS, cmd_to_vmm },
     { "gic-dump", TRACE_CMD_VERB_GIC_DUMP, cmd_gic_dump },
+    { "pc-sample", TRACE_CMD_VERB_PC_SAMPLE, cmd_pc_sample },
 };
 
 static const struct command *lookup(const char *verb, size_t len)
