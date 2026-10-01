@@ -17,8 +17,8 @@ A dump is written to the serial console with `microkit_dbg_puts`. That output ex
 
 | Prefix | Payload | Meaning |
 |---|---|---|
-| `TRH3 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
-| `TRC3 ` | 128 lowercase hex characters (64 bytes) | One record. |
+| `TRH4 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
+| `TRC4 ` | 128 lowercase hex characters (64 bytes) | One record. |
 
 The header is repeated because it's the one line whose loss would make the whole trace undecodable. Kernel debug output isn't serialised across cores. On the first v2 boot, the monitor's `MON|INFO: Microkit Monitor started!` on core 0 interleaved character by character with the tracer's first header on core 1. The decoder uses the first valid header copy, holds any records that arrive before it, and treats a later copy that differs as an error.
 
@@ -89,7 +89,7 @@ One non-empty command line typed on the console (see "Host commands" below). Pro
 
 | Field | Contents |
 |---|---|
-| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status` |
+| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status`, 7 `guest-regs` (v4) |
 | value | The line's number: 1 for the first command typed after boot, then 2, 3, … |
 | flags | Bit 0 ACCEPTED. Bit 2 REJECTED_VERB (unknown command). Exactly one is set. Bit 1 is unused. |
 
@@ -134,6 +134,7 @@ STARTED is recorded before the vCPU runs, so it precedes every record of that ru
 | 1 | Adds SMC_ENTER, SMC_REGS and SMC_EXIT (kinds 2–4). The record and header layouts are unchanged. Lines `TRH1` / `TRC1`. |
 | 2 | Adds CMD (kind 5) and a second producer (`uartrx`, producer 1). Layouts unchanged. Lines `TRH2` / `TRC2`. |
 | 3 | Adds GUEST (kind 6) and the guest-control verbs 4–6. Layouts unchanged. Lines `TRH3` / `TRC3`. |
+| 4 | Adds the CMD verb 7 `guest-regs`. Kinds and layouts unchanged. Lines `TRH4` / `TRC4`. |
 
 ## Host commands
 
@@ -148,6 +149,7 @@ The VMM no longer starts the guest at boot. It waits for `guest-start`:
 |---|---|---|---|
 | `guest-start` | start run 1 | refused: already running | fresh restart as run N+1 |
 | `guest-stop` | refused, and prints the state | stop the vCPU | refused, and prints the state |
+| `guest-regs` | refused | prints the vCPU's general registers and EL1 system registers. If the vCPU is running on its core, seL4 has to stall that core to read them, so a core that takes no interrupts hangs this command | prints the registers it stopped with |
 | `status` | prints the state, run number, and for a fault stop what stopped it (refused SMC, unhandled address, or vCPU exception with its HSR) and its PC. Once a guest has started, it also prints how many times the guest exited to the VMM this run and how long ago the last one was, per kind: memory access, SMC, WFI/WFE, sysreg, virtual-timer injection (VPPI event), vGIC maintenance (the guest's EOIs, from which libvmm acknowledges the timer), and other. The counts are console only; they aren't in the trace. Changes nothing. | | |
 
 Every start is a fresh start, never a resume: guest RAM is zeroed and the image reloaded, the vCPU's EL1 system registers are reset (`vcpu_reset`), and every general register is rewritten. So each run begins from the same state. **Exception:** libvmm cannot reset the virtual GIC, so vGIC state from one run survives into the next. The harness never uses the GIC; this must be fixed before a guest that does.

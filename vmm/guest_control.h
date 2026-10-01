@@ -9,6 +9,7 @@
 void guest_control_start(void);
 void guest_control_stop(void);
 void guest_control_status(void);
+void guest_control_regs(void);
 enum guest_fault_kind {
     GUEST_FAULT_SMC,
     GUEST_FAULT_MEMORY,

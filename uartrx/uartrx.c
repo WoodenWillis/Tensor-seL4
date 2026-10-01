@@ -158,6 +158,7 @@ static void cmd_help(uint64_t id, uint64_t verb)
     console_puts("  guest-start  start the guest from a fresh image (refused while it runs)\n");
     console_puts("  guest-stop   stop the running guest (refused if none is running)\n");
     console_puts("  status       show whether the guest is running, and why it stopped\n");
+    console_puts("  guest-regs   print the guest vCPU's registers (stalls the vCPU's core)\n");
 }
 
 static void cmd_ping(uint64_t id, uint64_t verb)
@@ -270,6 +271,7 @@ static const struct command commands[] = {
     { "guest-start", TRACE_CMD_VERB_GUEST_START, cmd_to_vmm },
     { "guest-stop", TRACE_CMD_VERB_GUEST_STOP, cmd_to_vmm },
     { "status", TRACE_CMD_VERB_STATUS, cmd_to_vmm },
+    { "guest-regs", TRACE_CMD_VERB_GUEST_REGS, cmd_to_vmm },
 };
 
 static const struct command *lookup(const char *verb, size_t len)

@@ -77,6 +77,9 @@ static void run_command(const struct cmd_entry *cmd)
     case TRACE_CMD_VERB_STATUS:
         guest_control_status();
         break;
+    case TRACE_CMD_VERB_GUEST_REGS:
+        guest_control_regs();
+        break;
     default:
         LOG_VMM_ERR("command %lu: verb %lu is not a VMM command\n", cmd->id, cmd->verb);
         break;

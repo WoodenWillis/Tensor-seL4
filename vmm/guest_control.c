@@ -3,6 +3,8 @@
 #include <microkit.h>
 #include <libvmm/libvmm.h>
 #include <libvmm/arch/aarch64/hsr.h>
+#include <libvmm/vcpu.h>
+#include <libvmm/tcb.h>
 
 #include <trace/trace.h>
 
@@ -133,6 +135,17 @@ void guest_control_status(void)
         return;
     }
     guest_stats_print();
+}
+
+void guest_control_regs(void)
+{
+    if (state == GUEST_NOT_STARTED) {
+        LOG_VMM("guest-regs refused: no guest has been started\n");
+        return;
+    }
+    LOG_VMM("run %lu vCPU registers:\n", run);
+    tcb_print_regs(GUEST_BOOT_VCPU_ID);
+    vcpu_print_regs(GUEST_BOOT_VCPU_ID);
 }
 
 void guest_control_fault_stopped(size_t vcpu_id, struct guest_fault fault)

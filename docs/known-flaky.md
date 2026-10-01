@@ -30,6 +30,8 @@ On ffcd608 (`logs/boot3.log`, not committed), the first run reached `init: hello
 
 On a32b637 (`logs/boot4.log`, not committed), the stall at start happened again, and the breadcrumb ruled out a stuck handler: `idle in its event loop for 13177 ms, label/ch 2 …, seq 2`. After handling `guest-start` (channel 2) the VMM received no guest fault at all, and it never woke up for the `status` notification, although uartrx and the tracer kept running. CPU 0 went into the guest and seL4 never scheduled the VMM on it again. seL4's timer here is CNTHP (PPI 26), which the guest can't reach. 7056e26 moves the guest vCPU to CPU 3 to find out whether the guest's core or the VMM's core is the one that stops.
 
+With the vCPU on CPU 3 (f370e47), the stall at start happened again, and this time the VMM on CPU 0 stayed responsive. `ping` and `status` both answered: `guest running (run 1)`, with every exit counter at 0. So the VMM was only ever collateral damage of sharing its core. The core given the guest is the one that stops, and the guest never makes its first trapped access. Still open: whether CPU 3 never ran the vCPU (a lost wakeup IPI to a core idling with no timer) or ran it and is stuck in Linux's early boot without trapping. The `guest-regs` command (trace v4) reads the vCPU's registers to tell these apart.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
