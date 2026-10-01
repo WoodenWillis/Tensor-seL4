@@ -162,6 +162,7 @@ static void cmd_help(uint64_t id, uint64_t verb)
     console_puts("  guest-regs   print the guest vCPU's registers (stalls the vCPU's core)\n");
     console_puts("  gic-dump     print every core's GIC redistributor state (debug kernel)\n");
     console_puts("  pc-sample    sample every core's PC, EL and security state via CoreSight\n");
+    console_puts("  tlbi-stress  10M broadcast TLB invalidations from CPU 2 (debug kernel)\n");
 }
 
 static void cmd_ping(uint64_t id, uint64_t verb)
@@ -260,6 +261,38 @@ static void cmd_pc_sample(uint64_t id, uint64_t verb)
     cs_sample_all(console_puts);
 }
 
+#define TLBI_STRESS_BATCHES 1000u
+#define TLBI_STRESS_BATCH 10000u
+#define TLBI_STRESS_REPORT_EVERY 100u
+
+static void tlbi_stress_progress(uint32_t batches, uint64_t worst)
+{
+    console_puts("tlbi-stress: ");
+    console_putdec((uint64_t)batches * TLBI_STRESS_BATCH);
+    console_puts(" broadcast invalidations completed, worst tlbi+dsb ");
+    console_putdec(worst);
+    console_puts(" ticks\n");
+    console_flush();
+}
+
+static void cmd_tlbi_stress(uint64_t id, uint64_t verb)
+{
+    uint64_t worst = 0;
+
+    console_puts("tlbi-stress: tlbi vaale1is + dsb ish from CPU 2 in the kernel; don't type until it finishes\n");
+    console_flush();
+    for (uint32_t batch = 1; batch <= TLBI_STRESS_BATCHES; batch++) {
+        uint64_t batch_worst = seL4_DebugTLBIStress(TLBI_STRESS_BATCH);
+        if (batch_worst > worst) {
+            worst = batch_worst;
+        }
+        if (batch % TLBI_STRESS_REPORT_EVERY == 0) {
+            tlbi_stress_progress(batch, worst);
+        }
+    }
+    console_puts("tlbi-stress: done\n");
+}
+
 static void cmd_gic_dump(uint64_t id, uint64_t verb)
 {
     console_puts("dumping GIC state; the kernel prints it directly\n");
@@ -291,6 +324,7 @@ static const struct command commands[] = {
     { "guest-regs", TRACE_CMD_VERB_GUEST_REGS, cmd_to_vmm },
     { "gic-dump", TRACE_CMD_VERB_GIC_DUMP, cmd_gic_dump },
     { "pc-sample", TRACE_CMD_VERB_PC_SAMPLE, cmd_pc_sample },
+    { "tlbi-stress", TRACE_CMD_VERB_TLBI_STRESS, cmd_tlbi_stress },
 };
 
 static const struct command *lookup(const char *verb, size_t len)

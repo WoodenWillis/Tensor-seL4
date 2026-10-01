@@ -17,8 +17,8 @@ A dump is written to the serial console with `microkit_dbg_puts`. That output ex
 
 | Prefix | Payload | Meaning |
 |---|---|---|
-| `TRH6 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
-| `TRC6 ` | 128 lowercase hex characters (64 bytes) | One record. |
+| `TRH7 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
+| `TRC7 ` | 128 lowercase hex characters (64 bytes) | One record. |
 
 The header is repeated because it's the one line whose loss would make the whole trace undecodable. Kernel debug output isn't serialised across cores. On the first v2 boot, the monitor's `MON|INFO: Microkit Monitor started!` on core 0 interleaved character by character with the tracer's first header on core 1. The decoder uses the first valid header copy, holds any records that arrive before it, and treats a later copy that differs as an error.
 
@@ -89,7 +89,7 @@ One non-empty command line typed on the console (see "Host commands" below). Pro
 
 | Field | Contents |
 |---|---|
-| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status`, 7 `guest-regs` (v4), 8 `gic-dump` (v5), 9 `pc-sample` (v6) |
+| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status`, 7 `guest-regs` (v4), 8 `gic-dump` (v5), 9 `pc-sample` (v6), 10 `tlbi-stress` (v7) |
 | value | The line's number: 1 for the first command typed after boot, then 2, 3, … |
 | flags | Bit 0 ACCEPTED. Bit 2 REJECTED_VERB (unknown command). Exactly one is set. Bit 1 is unused. |
 
@@ -137,13 +137,14 @@ STARTED is recorded before the vCPU runs, so it precedes every record of that ru
 | 4 | Adds the CMD verb 7 `guest-regs`. Kinds and layouts unchanged. Lines `TRH4` / `TRC4`. |
 | 5 | Adds the CMD verb 8 `gic-dump`. Kinds and layouts unchanged. Lines `TRH5` / `TRC5`. |
 | 6 | Adds the CMD verb 9 `pc-sample`. Kinds and layouts unchanged. Lines `TRH6` / `TRC6`. |
+| 7 | Adds the CMD verb 10 `tlbi-stress`. Kinds and layouts unchanged. Lines `TRH7` / `TRC7`. |
 
 ## Host commands
 
 `uartrx` is a small typed console on the same UART. It polls the receive FIFO, maps the UART read-only and touches only the receive registers.
 
 - Type a command and press Enter. CR, LF and CRLF all end a line. Backspace works, and what you type is echoed. A `> ` prompt means it's ready.
-- Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive), `gic-dump` (the kernel prints every core's current thread and GIC redistributor state; debug kernel only, seL4 patch 0006, temporary), `pc-sample` (samples every core's PC, exception level and security state through its CoreSight PMU block, using the vendor exynos-coresight sequence; unlocks the debug and PMU lock registers to do so; temporary), and the guest controls below. Guest commands are run by the VMM; the prompt comes back when the VMM has finished, or after 2 s with a warning.
+- Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive), `gic-dump` (the kernel prints every core's current thread and GIC redistributor state; debug kernel only, seL4 patch 0006, temporary), `pc-sample` (samples every core's PC, exception level and security state through its CoreSight PMU block, using the vendor exynos-coresight sequence; unlocks the debug and PMU lock registers to do so; temporary), `tlbi-stress` (10 million `tlbi vaale1is` + `dsb ish` from CPU 2 inside the kernel, in batches of 10,000, reporting the worst single latency; debug kernel only, seL4 patch 0008, temporary), and the guest controls below. Guest commands are run by the VMM; the prompt comes back when the VMM has finished, or after 2 s with a warning.
 
 The VMM no longer starts the guest at boot. It waits for `guest-start`:
 

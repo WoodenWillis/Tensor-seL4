@@ -1,0 +1,124 @@
+From 003d5a8423d2e873ddbff93130d1c28276931d22 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Thu, 1 Oct 2026 12:09:15 -0400
+Subject: [PATCH] debug: add a DebugTLBIStress syscall for aarch64
+
+Temporary debugging aid for the tensor-g4 bring-up; not for upstream.
+
+On caiman the core running a guest vCPU repeatedly stops for good on
+a dsb ish right after a broadcast tlbi vaale1is in the guest kernel:
+the broadcast invalidation never completes. Idle cores no longer
+execute wfi (patch 0007) and it still happens.
+
+seL4_DebugTLBIStress(n) issues n pairs of tlbi vaale1is, xzr and
+dsb ish from the calling core inside the kernel (VA 0, so nothing
+live is invalidated) and returns the worst single pair in counter
+ticks. n is capped at 1,000,000 so one call holds the kernel lock for
+a bounded time. If broadcast invalidation from seL4 itself also stalls,
+the problem is not specific to the guest.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CuTDwuvAxZ2dh5tWxWuRxe
+---
+ libsel4/arch_include/arm/sel4/arch/syscalls.h | 15 ++++++++++
+ libsel4/include/api/syscall.xml               |  9 ++++++
+ src/api/syscall.c                             | 30 +++++++++++++++++++
+ 3 files changed, 54 insertions(+)
+
+diff --git a/libsel4/arch_include/arm/sel4/arch/syscalls.h b/libsel4/arch_include/arm/sel4/arch/syscalls.h
+index 1d464d1dd..551324ea2 100644
+--- a/libsel4/arch_include/arm/sel4/arch/syscalls.h
++++ b/libsel4/arch_include/arm/sel4/arch/syscalls.h
+@@ -605,6 +605,21 @@ LIBSEL4_INLINE_FUNC void seL4_DebugDumpScheduler(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_DEBUG_BUILD) && defined(CONFIG_ARCH_AARCH64)
++LIBSEL4_INLINE_FUNC seL4_Word seL4_DebugTLBIStress(seL4_Word iterations)
++{
++    seL4_Word unused0 = 0;
++    seL4_Word unused1 = 0;
++    seL4_Word unused2 = 0;
++    seL4_Word unused3 = 0;
++    seL4_Word unused4 = 0;
++
++    arm_sys_send_recv(seL4_SysDebugTLBIStress, iterations, &iterations, 0, &unused0, &unused1, &unused2, &unused3,
++                      &unused4, 0);
++    return iterations;
++}
++#endif
++
+ #if defined(CONFIG_DEBUG_BUILD) && defined(CONFIG_ARM_GIC_V3_SUPPORT)
+ LIBSEL4_INLINE_FUNC void seL4_DebugGICDump(void)
+ {
+diff --git a/libsel4/include/api/syscall.xml b/libsel4/include/api/syscall.xml
+index f0633b148..b66e82689 100644
+--- a/libsel4/include/api/syscall.xml
++++ b/libsel4/include/api/syscall.xml
+@@ -68,6 +68,15 @@
+             </condition>
+             <syscall name="DebugGICDump"/>
+         </config>
++        <config>
++            <condition>
++                <and>
++                    <config var="CONFIG_DEBUG_BUILD"/>
++                    <config var="CONFIG_ARCH_AARCH64"/>
++                </and>
++            </condition>
++            <syscall name="DebugTLBIStress"/>
++        </config>
+         <config>
+             <condition><config var="CONFIG_DANGEROUS_CODE_INJECTION"/></condition>
+             <syscall name="DebugRun"/>
+diff --git a/src/api/syscall.c b/src/api/syscall.c
+index de02ea41e..234a26ec7 100644
+--- a/src/api/syscall.c
++++ b/src/api/syscall.c
+@@ -94,6 +94,29 @@ exception_t handleInterruptEntry(void)
+     return EXCEPTION_NONE;
+ }
+ 
++#if defined(CONFIG_DEBUG_BUILD) && defined(CONFIG_ARCH_AARCH64)
++#define TLBI_STRESS_MAX_ITERATIONS 1000000
++
++static word_t debug_tlbiStress(word_t iterations)
++{
++    word_t worst = 0;
++
++    if (iterations > TLBI_STRESS_MAX_ITERATIONS) {
++        iterations = TLBI_STRESS_MAX_ITERATIONS;
++    }
++    for (word_t i = 0; i < iterations; i++) {
++        word_t start, end;
++        asm volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(start));
++        asm volatile("tlbi vaale1is, xzr\n\tdsb ish" ::: "memory");
++        asm volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(end));
++        if (end - start > worst) {
++            worst = end - start;
++        }
++    }
++    return worst;
++}
++#endif
++
+ exception_t handleUnknownSyscall(word_t w)
+ {
+ #ifdef CONFIG_PRINTING
+@@ -114,6 +137,13 @@ exception_t handleUnknownSyscall(word_t w)
+         printf("Debug halt syscall from user thread %p \"%s\"\n", tptr, TCB_PTR_DEBUG_PTR(tptr)->tcbName);
+         halt();
+     }
++#ifdef CONFIG_ARCH_AARCH64
++    if (w == SysDebugTLBIStress) {
++        word_t iterations = getRegister(NODE_STATE(ksCurThread), capRegister);
++        setRegister(NODE_STATE(ksCurThread), capRegister, debug_tlbiStress(iterations));
++        return EXCEPTION_NONE;
++    }
++#endif
+ #ifdef CONFIG_ARM_GIC_V3_SUPPORT
+     if (w == SysDebugGICDump) {
+         gicv3_debug_dump();
+-- 
+2.53.0
+
