@@ -32,6 +32,8 @@ On a32b637 (`logs/boot4.log`, not committed), the stall at start happened again,
 
 With the vCPU on CPU 3 (f370e47), the stall at start happened again, and this time the VMM on CPU 0 stayed responsive. `ping` and `status` both answered: `guest running (run 1)`, with every exit counter at 0. So the VMM was only ever collateral damage of sharing its core. The core given the guest is the one that stops, and the guest never makes its first trapped access. Still open: whether CPU 3 never ran the vCPU (a lost wakeup IPI to a core idling with no timer) or ran it and is stuck in Linux's early boot without trapping. The `guest-regs` command (trace v4) reads the vCPU's registers to tell these apart.
 
+At cc3d599 (`logs/boot5.log`), the guest stalled mid-boot after `UDP hash table entries: 256`. `ping` still worked; `guest-regs` then froze the whole system. seL4 stalls a remote core to read a thread's registers only if that thread is the core's current thread (`remoteTCBStall`), so CPU 3 was running the vCPU and never handled the remote-call IPI. CPU 0 spun in `ipi_wait()` holding the kernel lock. So the core running the guest stops taking interrupts. That also cuts off the guest's virtual timer, which explains a guest that goes silent without trapping. f71f484 adds `gic-dump` (debug-only seL4 patch 0006) to read every core's GIC redistributor state from CPU 2 during a stall.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
