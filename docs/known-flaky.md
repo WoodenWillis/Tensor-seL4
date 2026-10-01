@@ -49,6 +49,8 @@ At f27c16f (`logs/boot5.log`, fifth capture), another stall. In all five `pc-sam
 
 With seL4 patch 0007 (9bc7dff; idle cores spin on `yield` and never execute `wfi`), the system still froze. So idle cores sleeping in `wfi` are very likely not the non-responder (one run). `freezewatch` stayed silent again. Its only trigger needed console output waiting in a ring, and in this freeze nothing was waiting: uartrx was presumably blocked in a system call before it read the typed key, and the tracer had already emptied the rings. A second trigger now fires when received characters stay unread in the UART FIFO for 4 s. A live uartrx drains the FIFO within microseconds, apart from its own wait of up to 2 s for the VMM.
 
+At 05e2b0a (`logs/boot5.log`, sixth capture; idle cores spinning), a stall during `alternatives: applying system-wide alternatives`. In all five `pc-sample` samples CPU 3 was at guest PC `0xffffffc008040768`, a `dsb ish` right after `tlbi vaale1is`. Two of three captures are this exact pattern: a broadcast TLB invalidation from the guest that never completes, with no core executing `wfi`. A stalled guest can't be stopped or restarted: seL4 needs an IPI taken by CPU 3 to stop or inspect a thread there, so `guest-stop` turns the stall into a total freeze.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
