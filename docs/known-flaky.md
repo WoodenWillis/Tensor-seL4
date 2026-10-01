@@ -51,6 +51,13 @@ With seL4 patch 0007 (9bc7dff; idle cores spin on `yield` and never execute `wfi
 
 At 05e2b0a (`logs/boot5.log`, sixth capture; idle cores spinning), a stall during `alternatives: applying system-wide alternatives`. In all five `pc-sample` samples CPU 3 was at guest PC `0xffffffc008040768`, a `dsb ish` right after `tlbi vaale1is`. Two of three captures are this exact pattern: a broadcast TLB invalidation from the guest that never completes, with no core executing `wfi`. A stalled guest can't be stopped or restarted: seL4 needs an IPI taken by CPU 3 to stop or inspect a thread there, so `guest-stop` turns the stall into a total freeze.
 
+At d42d375 (`logs/boot6.log`), `tlbi-stress` was typed while a guest was booting. The system froze before the first progress line, and `freezewatch` reported. It repeated its report about 17 times, because its own UART output re-armed it; that's fixed. The samples:
+- **CPU 2, EL2 `0x8080036b3c`:** the stress loop's `dsb ish` after `tlbi vaale1is, xzr`, holding the kernel lock.
+- **CPU 3, EL1 `0xffffffc00804007c`:** the guest's `dsb ish` after `tlbi vaale1is`.
+- **CPUs 0, 1, 4, 6 and 7, EL2 `0x8080010c2c`–`0x8080010cdc`:** inside `c_handle_interrupt`, spinning on the kernel lock.
+
+So once the guest's core is in this state, broadcast TLB invalidation from any core never completes, seL4's own included. Checked and ruled out: stage-2 guest RAM is `S2_NORMAL` (write-back) and Inner Shareable, and `VTCR_EL2` walks are write-back and Inner Shareable. Still open: whether `tlbi-stress` hangs with no guest running.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot

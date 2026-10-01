@@ -69,11 +69,14 @@ static bool ring_pending(uintptr_t vaddr)
     return __atomic_load_n(&ring->head, __ATOMIC_ACQUIRE) != __atomic_load_n(&ring->tail, __ATOMIC_ACQUIRE);
 }
 
+static bool output_pending(void)
+{
+    return ring_pending(vmm_console_vaddr) || ring_pending(uartrx_console_vaddr);
+}
+
 static bool tx_stuck(void)
 {
-    bool pending = ring_pending(vmm_console_vaddr) || ring_pending(uartrx_console_vaddr);
-
-    return pending && (uart_read(EXYNOS_UART_UTRSTAT) & EXYNOS_UART_UTRSTAT_TXE);
+    return output_pending() && (uart_read(EXYNOS_UART_UTRSTAT) & EXYNOS_UART_UTRSTAT_TXE);
 }
 
 static bool rx_stuck(void)
@@ -114,7 +117,7 @@ static void watch_forever(void)
         bool tx_fired = stalled(&tx, tx_stuck(), now);
         bool rx_fired = stalled(&rx, rx_stuck(), now);
 
-        if (tx.since == 0 && rx.since == 0) {
+        if (!output_pending() && !rx_stuck()) {
             reported = false;
         }
         if (!reported && (tx_fired || rx_fired)) {
