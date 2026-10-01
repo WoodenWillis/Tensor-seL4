@@ -34,6 +34,13 @@ With the vCPU on CPU 3 (f370e47), the stall at start happened again, and this ti
 
 At cc3d599 (`logs/boot5.log`), the guest stalled mid-boot after `UDP hash table entries: 256`. `ping` still worked; `guest-regs` then froze the whole system. seL4 stalls a remote core to read a thread's registers only if that thread is the core's current thread (`remoteTCBStall`), so CPU 3 was running the vCPU and never handled the remote-call IPI. CPU 0 spun in `ipi_wait()` holding the kernel lock. So the core running the guest stops taking interrupts. That also cuts off the guest's virtual timer, which explains a guest that goes silent without trapping. f71f484 adds `gic-dump` (debug-only seL4 patch 0006) to read every core's GIC redistributor state from CPU 2 during a stall.
 
+`gic-dump` during the next stall (f71f484, `logs/boot5.log` second capture) showed:
+- **CPU 3:** current thread `linux`, vCPU loaded and active. `ISENABLER0 0xe000003` (SGI 0–1, PPI 25–27), `ISPENDR0 0x4000000` (INTID 26, seL4's CNTHP timer, pending), `ISACTIVER0 0`. A pending, enabled interrupt and nothing active: CPU 3 takes no interrupts at all, so it isn't blocked behind a stuck active one.
+- **CPUs 4–7, idle:** INTID 26 active and pending. The kernel timer was acknowledged and never deactivated on those cores. That's unexplained, but it doesn't block other interrupts, because seL4's split EOI mode drops priority on EOI.
+- **`IGROUPR0` reads 0 everywhere:** with GICD_CTLR.DS == 0 that register is RAZ to Non-secure reads, so it tells nothing.
+
+e82c30a adds `pc-sample`, the vendor exynos-coresight PMUPCSR sequence, to see where CPU 3 is executing.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
