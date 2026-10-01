@@ -5,7 +5,7 @@ import re
 import struct
 import sys
 
-VERSIONS = (0, 1, 2, 3, 4)
+VERSIONS = (0, 1, 2, 3, 4, 5)
 MAGIC = b"SEL4TRC\0"
 RECORD = struct.Struct("<QQQQQIHBBBB6xQ")
 HEADER = struct.Struct("<8sHHI16s32s48s48s48s64s64s")
@@ -22,6 +22,7 @@ KINDS_BY_VERSION = {
     2: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD},
     3: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
     4: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
+    5: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
 }
 
 MMIO_WRITE = 1 << 0
@@ -34,7 +35,7 @@ SMC_UNHANDLED = 1 << 2
 
 CMD_ACCEPTED = 1 << 0
 CMD_REJECTED_VERB = 1 << 2
-CMD_VERBS = {0: "-", 1: "ping", 2: "trace-dump", 3: "help", 4: "guest-start", 5: "guest-stop", 6: "status", 7: "guest-regs"}
+CMD_VERBS = {0: "-", 1: "ping", 2: "trace-dump", 3: "help", 4: "guest-start", 5: "guest-stop", 6: "status", 7: "guest-regs", 8: "gic-dump"}
 GUEST_EVENTS = {1: "STARTED", 2: "STOPPED_BY_COMMAND", 3: "STOPPED_BY_FAULT"}
 
 HEADER_LINE = re.compile(r"TRH([0-9]) ([0-9a-f]*)")
@@ -223,7 +224,7 @@ def decode(stream, out, console_tx):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Decode a trace format v0, v1, v2, v3 or v4 serial log.")
+    parser = argparse.ArgumentParser(description="Decode a trace format v0 to v5 serial log.")
     parser.add_argument("log", nargs="?", type=argparse.FileType("r", errors="replace"), default=sys.stdin)
     parser.add_argument("--console-tx", type=lambda s: int(s, 0),
                         help="guest-physical address of a UART TX register to reassemble guest output from")

@@ -1,0 +1,165 @@
+From eb596136e7f41cfca31fa1e7847651038045cc92 Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Thu, 1 Oct 2026 07:56:31 -0400
+Subject: [PATCH] debug: add a DebugGICDump syscall for GICv3
+
+Temporary debugging aid for the tensor-g4 bring-up; not for upstream.
+
+On caiman a core running a guest vCPU sometimes stops taking
+interrupts: a remote-call IPI to it is never handled, so the sender
+spins in ipi_wait() holding the kernel lock. The GIC is a kernel
+device, so its per-core state can't be read from user level, and the
+wedged core can't report it itself.
+
+seL4_DebugGICDump() prints, from whichever core calls it, GICD_CTLR
+and for every core: its current thread, the loaded vCPU and whether
+it is active, and its redistributor's GICR_CTLR, WAKER, IGROUPR0,
+IGRPMODR0, ISENABLER0, ISPENDR0, ISACTIVER0 and IPRIORITYR0..7. An
+SGI or PPI left active on a core shows up in ISACTIVER0, and a pending
+IPI that is never taken in ISPENDR0 (seL4's IPIs are SGI 0 and 1).
+
+Only built with CONFIG_DEBUG_BUILD and CONFIG_ARM_GIC_V3_SUPPORT. The
+syscall is appended after the existing debug syscalls, so the numbers
+of the others don't change.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CuTDwuvAxZ2dh5tWxWuRxe
+---
+ include/arch/arm/arch/machine/gic_v3.h        |  4 ++
+ libsel4/arch_include/arm/sel4/arch/syscalls.h | 14 ++++++
+ libsel4/include/api/syscall.xml               |  9 ++++
+ src/api/syscall.c                             |  6 +++
+ src/arch/arm/machine/gic_v3.c                 | 43 +++++++++++++++++++
+ 5 files changed, 76 insertions(+)
+
+diff --git a/include/arch/arm/arch/machine/gic_v3.h b/include/arch/arm/arch/machine/gic_v3.h
+index 6ef0856c1..065a5fc1a 100644
+--- a/include/arch/arm/arch/machine/gic_v3.h
++++ b/include/arch/arm/arch/machine/gic_v3.h
+@@ -260,6 +260,10 @@ extern volatile struct gic_dist_map *const gic_dist;
+ extern volatile struct gic_rdist_map *gic_rdist_map[CONFIG_MAX_NUM_NODES];
+ extern volatile struct gic_rdist_sgi_ppi_map *gic_rdist_sgi_ppi_map[CONFIG_MAX_NUM_NODES];
+ 
++#if defined(CONFIG_DEBUG_BUILD) && defined(CONFIG_PRINTING)
++void gicv3_debug_dump(void);
++#endif
++
+ /* Helpers */
+ static inline void gic_enable_clr(word_t irq)
+ {
+diff --git a/libsel4/arch_include/arm/sel4/arch/syscalls.h b/libsel4/arch_include/arm/sel4/arch/syscalls.h
+index 3331b286b..1d464d1dd 100644
+--- a/libsel4/arch_include/arm/sel4/arch/syscalls.h
++++ b/libsel4/arch_include/arm/sel4/arch/syscalls.h
+@@ -605,6 +605,20 @@ LIBSEL4_INLINE_FUNC void seL4_DebugDumpScheduler(void)
+ }
+ #endif
+ 
++#if defined(CONFIG_DEBUG_BUILD) && defined(CONFIG_ARM_GIC_V3_SUPPORT)
++LIBSEL4_INLINE_FUNC void seL4_DebugGICDump(void)
++{
++    seL4_Word unused0 = 0;
++    seL4_Word unused1 = 0;
++    seL4_Word unused2 = 0;
++    seL4_Word unused3 = 0;
++    seL4_Word unused4 = 0;
++    seL4_Word unused5 = 0;
++
++    arm_sys_send_recv(seL4_SysDebugGICDump, 0, &unused0, 0, &unused1, &unused2, &unused3, &unused4, &unused5, 0);
++}
++#endif
++
+ #if CONFIG_DEBUG_BUILD
+ LIBSEL4_INLINE_FUNC void seL4_DebugHalt(void)
+ {
+diff --git a/libsel4/include/api/syscall.xml b/libsel4/include/api/syscall.xml
+index 8174659d3..f0633b148 100644
+--- a/libsel4/include/api/syscall.xml
++++ b/libsel4/include/api/syscall.xml
+@@ -59,6 +59,15 @@
+             <syscall name="DebugSendIPI"/>
+             <syscall name="DebugGetThreadAffinity"/>
+         </config>
++        <config>
++            <condition>
++                <and>
++                    <config var="CONFIG_DEBUG_BUILD"/>
++                    <config var="CONFIG_ARM_GIC_V3_SUPPORT"/>
++                </and>
++            </condition>
++            <syscall name="DebugGICDump"/>
++        </config>
+         <config>
+             <condition><config var="CONFIG_DANGEROUS_CODE_INJECTION"/></condition>
+             <syscall name="DebugRun"/>
+diff --git a/src/api/syscall.c b/src/api/syscall.c
+index ec8880760..de02ea41e 100644
+--- a/src/api/syscall.c
++++ b/src/api/syscall.c
+@@ -114,6 +114,12 @@ exception_t handleUnknownSyscall(word_t w)
+         printf("Debug halt syscall from user thread %p \"%s\"\n", tptr, TCB_PTR_DEBUG_PTR(tptr)->tcbName);
+         halt();
+     }
++#ifdef CONFIG_ARM_GIC_V3_SUPPORT
++    if (w == SysDebugGICDump) {
++        gicv3_debug_dump();
++        return EXCEPTION_NONE;
++    }
++#endif
+     if (w == SysDebugSnapshot) {
+         tcb_t *UNUSED tptr = NODE_STATE(ksCurThread);
+         printf("Debug snapshot syscall from user thread %p \"%s\"\n",
+diff --git a/src/arch/arm/machine/gic_v3.c b/src/arch/arm/machine/gic_v3.c
+index f912f8744..df61f673c 100644
+--- a/src/arch/arm/machine/gic_v3.c
++++ b/src/arch/arm/machine/gic_v3.c
+@@ -476,3 +476,46 @@ void setIRQTarget(irq_t irq, seL4_Word target)
+ word_t gic_vcpu_num_list_regs;
+ 
+ #endif /* End of CONFIG_ARM_HYPERVISOR_SUPPORT */
++
++#if defined(CONFIG_DEBUG_BUILD) && defined(CONFIG_PRINTING)
++static void gicv3_debug_dump_thread(word_t core)
++{
++    tcb_t *cur = NODE_STATE_ON_CORE(ksCurThread, core);
++
++    printf("core %lu: current thread %p \"%s\"", core, cur, cur ? TCB_PTR_DEBUG_PTR(cur)->tcbName : "");
++#ifdef CONFIG_ARM_HYPERVISOR_SUPPORT
++    printf(", loaded vcpu %p, vcpu active %d", ARCH_NODE_STATE_ON_CORE(armHSCurVCPU, core),
++           (int)ARCH_NODE_STATE_ON_CORE(armHSVCPUActive, core));
++#endif
++    printf("\n");
++}
++
++static void gicv3_debug_dump_rdist(word_t core)
++{
++    volatile struct gic_rdist_map *rd = gic_rdist_map[core];
++    volatile struct gic_rdist_sgi_ppi_map *sgi = gic_rdist_sgi_ppi_map[core];
++
++    if (rd == NULL || sgi == NULL) {
++        printf("core %lu: redistributor not mapped\n", core);
++        return;
++    }
++    printf("core %lu: GICR_CTLR 0x%x WAKER 0x%x IGROUPR0 0x%x IGRPMODR0 0x%x ISENABLER0 0x%x ISPENDR0 0x%x ISACTIVER0 0x%x\n",
++           core, (unsigned int)rd->ctlr, (unsigned int)rd->waker, (unsigned int)sgi->igroupr0,
++           (unsigned int)sgi->igrpmodr0, (unsigned int)sgi->isenabler0, (unsigned int)sgi->ispendr0,
++           (unsigned int)sgi->isactiver0);
++    printf("core %lu: GICR_IPRIORITYR0..7", core);
++    for (int i = 0; i < 8; i++) {
++        printf(" 0x%x", (unsigned int)sgi->ipriorityrn[i]);
++    }
++    printf("\n");
++}
++
++void gicv3_debug_dump(void)
++{
++    printf("GIC dump from core %lu: GICD_CTLR 0x%x\n", (word_t)getCurrentCPUIndex(), (unsigned int)gic_dist->ctlr);
++    for (word_t core = 0; core < CONFIG_MAX_NUM_NODES; core++) {
++        gicv3_debug_dump_thread(core);
++        gicv3_debug_dump_rdist(core);
++    }
++}
++#endif
+-- 
+2.53.0
+

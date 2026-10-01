@@ -17,8 +17,8 @@ A dump is written to the serial console with `microkit_dbg_puts`. That output ex
 
 | Prefix | Payload | Meaning |
 |---|---|---|
-| `TRH4 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
-| `TRC4 ` | 128 lowercase hex characters (64 bytes) | One record. |
+| `TRH5 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
+| `TRC5 ` | 128 lowercase hex characters (64 bytes) | One record. |
 
 The header is repeated because it's the one line whose loss would make the whole trace undecodable. Kernel debug output isn't serialised across cores. On the first v2 boot, the monitor's `MON|INFO: Microkit Monitor started!` on core 0 interleaved character by character with the tracer's first header on core 1. The decoder uses the first valid header copy, holds any records that arrive before it, and treats a later copy that differs as an error.
 
@@ -89,7 +89,7 @@ One non-empty command line typed on the console (see "Host commands" below). Pro
 
 | Field | Contents |
 |---|---|
-| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status`, 7 `guest-regs` (v4) |
+| addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status`, 7 `guest-regs` (v4), 8 `gic-dump` (v5) |
 | value | The line's number: 1 for the first command typed after boot, then 2, 3, … |
 | flags | Bit 0 ACCEPTED. Bit 2 REJECTED_VERB (unknown command). Exactly one is set. Bit 1 is unused. |
 
@@ -135,13 +135,14 @@ STARTED is recorded before the vCPU runs, so it precedes every record of that ru
 | 2 | Adds CMD (kind 5) and a second producer (`uartrx`, producer 1). Layouts unchanged. Lines `TRH2` / `TRC2`. |
 | 3 | Adds GUEST (kind 6) and the guest-control verbs 4–6. Layouts unchanged. Lines `TRH3` / `TRC3`. |
 | 4 | Adds the CMD verb 7 `guest-regs`. Kinds and layouts unchanged. Lines `TRH4` / `TRC4`. |
+| 5 | Adds the CMD verb 8 `gic-dump`. Kinds and layouts unchanged. Lines `TRH5` / `TRC5`. |
 
 ## Host commands
 
 `uartrx` is a small typed console on the same UART. It polls the receive FIFO, maps the UART read-only and touches only the receive registers.
 
 - Type a command and press Enter. CR, LF and CRLF all end a line. Backspace works, and what you type is echoed. A `> ` prompt means it's ready.
-- Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive), and the guest controls below. Guest commands are run by the VMM; the prompt comes back when the VMM has finished, or after 2 s with a warning.
+- Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive), `gic-dump` (the kernel prints every core's current thread and GIC redistributor state; debug kernel only, seL4 patch 0006, temporary), and the guest controls below. Guest commands are run by the VMM; the prompt comes back when the VMM has finished, or after 2 s with a warning.
 
 The VMM no longer starts the guest at boot. It waits for `guest-start`:
 

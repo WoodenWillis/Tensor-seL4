@@ -159,6 +159,7 @@ static void cmd_help(uint64_t id, uint64_t verb)
     console_puts("  guest-stop   stop the running guest (refused if none is running)\n");
     console_puts("  status       show whether the guest is running, and why it stopped\n");
     console_puts("  guest-regs   print the guest vCPU's registers (stalls the vCPU's core)\n");
+    console_puts("  gic-dump     print every core's GIC redistributor state (debug kernel)\n");
 }
 
 static void cmd_ping(uint64_t id, uint64_t verb)
@@ -250,6 +251,13 @@ static void cmd_to_vmm(uint64_t id, uint64_t verb)
     }
 }
 
+static void cmd_gic_dump(uint64_t id, uint64_t verb)
+{
+    console_puts("dumping GIC state; the kernel prints it directly\n");
+    console_flush();
+    seL4_DebugGICDump();
+}
+
 static void cmd_trace_dump(uint64_t id, uint64_t verb)
 {
     struct trace_control *control = (struct trace_control *)trace_control_vaddr;
@@ -272,6 +280,7 @@ static const struct command commands[] = {
     { "guest-stop", TRACE_CMD_VERB_GUEST_STOP, cmd_to_vmm },
     { "status", TRACE_CMD_VERB_STATUS, cmd_to_vmm },
     { "guest-regs", TRACE_CMD_VERB_GUEST_REGS, cmd_to_vmm },
+    { "gic-dump", TRACE_CMD_VERB_GIC_DUMP, cmd_gic_dump },
 };
 
 static const struct command *lookup(const char *verb, size_t len)

@@ -10,7 +10,7 @@ declare -A patched_head=(
     [libvmm]=ae52d393e2aaa8a7fc9a75ef39f889e8c31250a2
     [microkit]=da7c8bf1b98839ae7e13637869fd44e59e05a38a
     [rust-sel4]=49fb1e9d35b9f04a71201383e6839c166c36c501
-    [seL4]=c867f3a2734382460a78292251497f001d803de8
+    [seL4]=eb596136e7f41cfca31fa1e7847651038045cc92
 )
 
 die() {
