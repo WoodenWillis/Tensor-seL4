@@ -62,7 +62,7 @@
         <map mr="fbcon_ring" vaddr="0x4001c000" perms="rw" setvar_vaddr="fbcon_ring_vaddr" />
     </protection_domain>
 
-    <protection_domain name="freezewatch" priority="1" cpu="5">
+    <protection_domain name="freezewatch" priority="1" cpu="5" budget="1000000000000" period="1000000000000">
         <program_image path="freezewatch.elf" />
         <map mr="uart" vaddr="0x30000000" perms="rw" cached="false" setvar_vaddr="uart_vaddr" />
         <map mr="console_ring" vaddr="0x40000000" perms="r" setvar_vaddr="vmm_console_vaddr" />
