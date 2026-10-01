@@ -56,7 +56,7 @@ At d42d375 (`logs/boot6.log`), `tlbi-stress` was typed while a guest was booting
 - **CPU 3, EL1 `0xffffffc00804007c`:** the guest's `dsb ish` after `tlbi vaale1is`.
 - **CPUs 0, 1, 4, 6 and 7, EL2 `0x8080010c2c`–`0x8080010cdc`:** inside `c_handle_interrupt`, spinning on the kernel lock.
 
-So once the guest's core is in this state, broadcast TLB invalidation from any core never completes, seL4's own included. Checked and ruled out: stage-2 guest RAM is `S2_NORMAL` (write-back) and Inner Shareable, and `VTCR_EL2` walks are write-back and Inner Shareable. Still open: whether `tlbi-stress` hangs with no guest running.
+So once the guest's core is in this state, broadcast TLB invalidation from any core never completes, seL4's own included. Checked and ruled out: stage-2 guest RAM is `S2_NORMAL` (write-back) and Inner Shareable, and `VTCR_EL2` walks are write-back and Inner Shareable. With no guest running (b5bc63e, `logs/boot6.log`), `tlbi-stress` completed all 10,000,000 broadcast invalidations from CPU 2. The worst `tlbi`+`dsb` took 133 ticks (about 5.4 µs). Broadcast invalidation works on this SoC until a guest's core gets into the stuck state.
 
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
