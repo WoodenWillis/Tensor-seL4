@@ -62,6 +62,13 @@ At c8cde82 (`logs/boot7.log`, lab build, Linux guest), another stall, and this t
 
 Every stall so far had a Linux guest running on a Cortex-A520: CPU 0, then CPU 3. The vendor DTB's ECC handler names the A520s as merged pairs ("Core0-1 Complex", "Core2-3 Complex"), and in both placements the guest's pair partner was busy with another PD (the tracer on CPU 1, then uartrx on CPU 2). Not yet tested: whether the stall needs an A520, and whether it needs Linux. The lab build now has three vCPUs, and `guest-start … vcpu K` picks the core: 0 is CPU 3 (A520), 1 is CPU 6 (A720), 2 is CPU 7 (X4). Harness modes 1–4 on the same cores cover the second question.
 
+At ad49b0c (`logs/boot7.log`, second boot in the file, lab build), the first `guest-start linux vcpu 2` stalled, so the stall doesn't need an A520. The guest booted on CPU 7 (`Booting Linux on physical CPU 0x0000000002 [0x410fd821]`, the Cortex-X4) and went silent after `kvm [1]: HYP mode not available`, the same last line as the entry "goes silent mid-boot" below. `ping` answered. What the captures show:
+- **`pc-sample`:** CPU 7 at EL1 NS, PC `0xffffffc008040078` in all five samples. That's the `b.ne` closing the `tlbi vaale1is` loop, the instruction right before the `dsb ish` at `0xffffffc00804007c` where the A520 captures sat. The same barrier, with the X4 reporting the last instruction it retired, is the likely reading; not confirmed.
+- **Every other core was running normally:** CPUs 0, 3 and 6 in seL4's idle loop, CPU 1 in the kernel for the tracer, CPUs 2, 4 and 5 at EL0. No other core was visibly stuck.
+- **`gic-dump`:** CPU 7 had INTIDs 26 and 27 pending, enabled, and nothing active (`ISPENDR0 0xc000000`, `ISACTIVER0 0`). It takes no interrupts, as on the A520.
+
+So the merged-pair theory is out: the X4 isn't a merged core, and its neighbours were idle. One run on the X4, one stall. Still untested: whether a guest other than Linux stalls (harness modes 1–4), and the A720.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
