@@ -139,12 +139,20 @@ ifeq ($(strip $(SPLEEN_FONT_DIR)),)
 $(error SPLEEN_FONT_DIR must be set; run inside the Nix dev shell)
 endif
 FBCON_FONT ?= spleen-12x24
+FBCON_SCALE ?= 2
+FBCON_MARGIN_TOP ?= 160
+FBCON_MARGIN_BOTTOM ?= 120
+FBCON_MARGIN_SIDE ?= 32
+FBCON_CFLAGS := -DFBCON_SCALE=$(FBCON_SCALE)u -DFBCON_MARGIN_TOP=$(FBCON_MARGIN_TOP)u \
+	-DFBCON_MARGIN_BOTTOM=$(FBCON_MARGIN_BOTTOM)u -DFBCON_MARGIN_SIDE=$(FBCON_MARGIN_SIDE)u
 
-fbcon_font.h: $(SPLEEN_FONT_DIR)/$(FBCON_FONT).bdf $(TOP)/tools/bdf2c.py
+fbcon_font.h: $(SPLEEN_FONT_DIR)/$(FBCON_FONT).bdf $(TOP)/tools/bdf2c.py FORCE_FBCON_FLAGS
 	python3 $(TOP)/tools/bdf2c.py $< $@
 
-fbcon.o: $(TOP)/fbcon/fbcon.c fbcon_font.h
-	$(CC) $(CFLAGS) -I. -c -o $@ $<
+fbcon.o: $(TOP)/fbcon/fbcon.c fbcon_font.h FORCE_FBCON_FLAGS
+	$(CC) $(CFLAGS) $(FBCON_CFLAGS) -I. -c -o $@ $<
+
+FORCE_FBCON_FLAGS:
 
 fbcon.elf: fbcon.o libsddf_util_debug.a
 	$(LD) $(LDFLAGS) fbcon.o $(TRACER_LIBS) -o $@

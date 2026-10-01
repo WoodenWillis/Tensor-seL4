@@ -13,9 +13,12 @@
 
 #define TRACER_CH 1
 
-#define SCALE 1u
+#define SCALE FBCON_SCALE
 #define CELL_W (FONT_W * SCALE)
 #define CELL_H (FONT_H * SCALE)
+#define MARGIN_TOP FBCON_MARGIN_TOP
+#define MARGIN_BOTTOM FBCON_MARGIN_BOTTOM
+#define MARGIN_SIDE FBCON_MARGIN_SIDE
 #define FG 0xffffffffu
 #define BG 0xff000000u
 #define TAB_WIDTH 4u
@@ -23,9 +26,6 @@
 
 #define MAX_COLS 160u
 #define MAX_ROWS 360u
-
-#define BAND_HEIGHT 48u
-#define RENDERS_LOGGED 5u
 
 uintptr_t decon_vaddr;
 uintptr_t rdma_vaddr;
@@ -43,7 +43,6 @@ static bool ready;
 static bool scrolled;
 static char grid[MAX_ROWS][MAX_COLS];
 static bool dirty[MAX_ROWS];
-static uint64_t renders;
 
 static uint32_t reg_read(uintptr_t base, uint32_t offset)
 {
@@ -105,8 +104,12 @@ static bool read_geometry(void)
         log_hex("FBCON|ERROR: framebuffer is larger than our buffer of ", FBCON_FB_SIZE);
         return false;
     }
-    cols = width / CELL_W;
-    rows = height / CELL_H;
+    if (width <= 2 * MARGIN_SIDE || height <= MARGIN_TOP + MARGIN_BOTTOM) {
+        microkit_dbg_puts("FBCON|ERROR: the margins leave no room for text\n");
+        return false;
+    }
+    cols = (width - 2 * MARGIN_SIDE) / CELL_W;
+    rows = (height - MARGIN_TOP - MARGIN_BOTTOM) / CELL_H;
     if (cols > MAX_COLS || rows > MAX_ROWS) {
         microkit_dbg_puts("FBCON|ERROR: text grid exceeds MAX_COLS x MAX_ROWS\n");
         return false;
@@ -132,7 +135,7 @@ static void draw_glyph(uint32_t col, uint32_t row, char ch)
 
     for (uint32_t gy = 0; gy < FONT_H; gy++) {
         for (uint32_t sy = 0; sy < SCALE; sy++) {
-            volatile uint32_t *px = pixel_row(row * CELL_H + gy * SCALE + sy) + col * CELL_W;
+            volatile uint32_t *px = pixel_row(MARGIN_TOP + row * CELL_H + gy * SCALE + sy) + MARGIN_SIDE + col * CELL_W;
             for (uint32_t gx = 0; gx < FONT_W; gx++) {
                 uint32_t color = (glyph[gy] >> (FONT_W - 1 - gx)) & 1u ? FG : BG;
                 for (uint32_t sx = 0; sx < SCALE; sx++) {
@@ -255,35 +258,11 @@ static void draw_row(uint32_t r)
     for (uint32_t c = 0; c < cols; c++) {
         draw_glyph(c, r, grid[r][c]);
     }
-    clean_rows(r * CELL_H, CELL_H);
-}
-
-/* TODO(will): remove the test bands and render log once the panel console is proven */
-static void draw_test_bands(void)
-{
-    static const uint32_t colors[] = { 0xffff0000u, 0xff00ff00u, 0xff0000ffu, 0xffffffffu };
-    uint32_t bands = sizeof(colors) / sizeof(colors[0]);
-
-    for (uint32_t y = 0; y < bands * BAND_HEIGHT && y < height; y++) {
-        volatile uint32_t *px = pixel_row(y);
-        for (uint32_t x = 0; x < width; x++) {
-            px[x] = colors[y / BAND_HEIGHT];
-        }
-    }
-    clean_rows(0, bands * BAND_HEIGHT < height ? bands * BAND_HEIGHT : height);
-}
-
-static void log_render(void)
-{
-    renders++;
-    if (renders <= RENDERS_LOGGED) {
-        log_hex("FBCON|INFO: render ", renders);
-    }
+    clean_rows(MARGIN_TOP + r * CELL_H, CELL_H);
 }
 
 static void render(void)
 {
-    log_render();
     for (uint32_t r = 0; r < rows; r++) {
         if (scrolled || dirty[r]) {
             draw_row(r);
@@ -318,16 +297,10 @@ void init(void)
         return;
     }
     clear_screen();
-    draw_test_bands();
     retarget_scanout();
     start_decon();
     present();
     ready = true;
-    cur_row = (4 * BAND_HEIGHT + CELL_H - 1) / CELL_H;
-    for (const char *s = "fbcon: frame 2, drawn by the text renderer\n"; *s != '\0'; s++) {
-        put(*s);
-    }
-    render();
     microkit_dbg_puts("FBCON|INFO: mirroring the console to the panel\n");
 }
 
