@@ -6,13 +6,13 @@
 #include <microkit.h>
 
 #include <hw/exynos_uart.h>
-#include <hw/zumapro_coresight.h>
 #include <trace/cmd_ring.h>
 #include <trace/console_ring.h>
 #include <trace/trace.h>
 #include <trace/trace_archive.h>
 
 #include "trace_producer.h"
+#include "coresight.h"
 
 #define TRACER_CH 1
 #define VMM_CH 2
@@ -253,68 +253,11 @@ static void cmd_to_vmm(uint64_t id, uint64_t verb)
     }
 }
 
-static uint32_t cs_read(uintptr_t base, uint32_t offset)
-{
-    return *(volatile uint32_t *)(base + offset);
-}
-
-static void cs_write(uintptr_t base, uint32_t offset, uint32_t val)
-{
-    *(volatile uint32_t *)(base + offset) = val;
-}
-
-static uint64_t cs_read64(uintptr_t base, uint32_t offset)
-{
-    return *(volatile uint64_t *)(base + offset);
-}
-
-static void pc_sample_line(uint32_t core, uint64_t pcsr)
-{
-    console_puts("  core ");
-    console_putdec(core);
-    console_puts(" PMUPCSR ");
-    console_puthex64(pcsr);
-    console_puts(" ns ");
-    console_putdec(CS_PCSR_NS(pcsr));
-    console_puts(" el ");
-    console_putdec(CS_PCSR_EL(pcsr));
-    console_puts("\n");
-}
-
-static void pc_sample_core(uint32_t core)
-{
-    uintptr_t dbg = CS_DBG_VADDR(core);
-    uintptr_t pmu = CS_PMU_VADDR(core);
-    uint32_t prsr = cs_read(dbg, CS_DBGPRSR);
-
-    console_puts("core ");
-    console_putdec(core);
-    console_puts(": DBGPRSR ");
-    console_puthex32(prsr);
-    console_puts(" MIDR ");
-    console_puthex32(cs_read(dbg, CS_MIDR));
-    console_puts("\n");
-    if (!(prsr & CS_PRSR_POWER_UP) || (prsr & CS_PRSR_RESET_STATE)) {
-        console_puts("  powered down or in reset; not sampled\n");
-        return;
-    }
-    cs_write(dbg, CS_DBGLAR, CS_OSLOCK_MAGIC);
-    cs_write(dbg, CS_DBGOSLAR, 0);
-    cs_write(pmu, CS_DBGLAR, CS_OSLOCK_MAGIC);
-    for (uint32_t i = 0; i < CS_PCSR_SAMPLES; i++) {
-        (void)cs_read64(pmu, CS_PMUPCSR);
-        pc_sample_line(core, cs_read64(pmu, CS_PMUPCSR));
-    }
-    cs_write(pmu, CS_DBGLAR, CS_LOCK);
-}
-
 /* TODO(will): remove pc-sample with gic-dump once the wedged-core problem is understood */
 static void cmd_pc_sample(uint64_t id, uint64_t verb)
 {
     console_puts("sampling every core's PC through CoreSight (exynos-coresight sequence)\n");
-    for (uint32_t core = 0; core < CS_NUM_CORES; core++) {
-        pc_sample_core(core);
-    }
+    cs_sample_all(console_puts);
 }
 
 static void cmd_gic_dump(uint64_t id, uint64_t verb)

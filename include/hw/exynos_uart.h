@@ -16,6 +16,7 @@
 #define EXYNOS_UART_UFCON_FIFOMODE   (1u << 0)
 #define EXYNOS_UART_UFSTAT_RXCOUNT   0xffu
 #define EXYNOS_UART_UFSTAT_RXFULL    (1u << 8)
+#define EXYNOS_UART_UFSTAT_TXFULL    (1u << 24)
 #define EXYNOS_UART_UTRSTAT_RXDR     (1u << 0)
 #define EXYNOS_UART_UTRSTAT_TXFE     (1u << 1)
 #define EXYNOS_UART_UTRSTAT_TXE      (1u << 2)

@@ -61,7 +61,7 @@ LINUX_INIT_CFLAGS := \
 VMM_OBJS := vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o \
 	breadcrumb.o guest_stats.o guest_image_$(GUEST).o images_$(GUEST).o
 TRACER_OBJS := tracer.o
-UARTRX_OBJS := uartrx.o trace_producer.o
+UARTRX_OBJS := uartrx.o trace_producer.o coresight.o
 
 LDFLAGS := -L$(BOARD_DIR)/lib
 VMM_LIBS := --start-group -lmicrokit -Tmicrokit.ld libvmm.a libsddf_util_console.a --end-group
@@ -130,7 +130,7 @@ tracer.elf: $(TRACER_OBJS) libsddf_util_debug.a
 	$(LD) $(LDFLAGS) $(TRACER_OBJS) $(TRACER_LIBS) -o $@
 
 uartrx.o: $(TOP)/uartrx/uartrx.c
-	$(CC) $(CFLAGS) -I$(TOP)/vmm -c -o $@ $<
+	$(CC) $(CFLAGS) -I$(TOP)/vmm -I$(TOP)/diag -c -o $@ $<
 
 uartrx.elf: $(UARTRX_OBJS) libsddf_util_debug.a
 	$(LD) $(LDFLAGS) $(UARTRX_OBJS) $(TRACER_LIBS) -o $@
@@ -154,13 +154,22 @@ fbcon.o: $(TOP)/fbcon/fbcon.c fbcon_font.h FORCE_FBCON_FLAGS
 
 FORCE_FBCON_FLAGS:
 
+coresight.o: $(TOP)/diag/coresight.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+freezewatch.o: $(TOP)/freezewatch/freezewatch.c
+	$(CC) $(CFLAGS) -I$(TOP)/diag -c -o $@ $<
+
+freezewatch.elf: freezewatch.o coresight.o libsddf_util_debug.a
+	$(LD) $(LDFLAGS) freezewatch.o coresight.o $(TRACER_LIBS) -o $@
+
 fbcon.elf: fbcon.o libsddf_util_debug.a
 	$(LD) $(LDFLAGS) fbcon.o $(TRACER_LIBS) -o $@
 
 caiman.system: $(TOP)/vmm/caiman.system.S $(TOP)/guests/$(GUEST)/guest_map.h $(TOP)/include/hw/zumapro_dpu.h
 	$(CC) -E -P -x c -I$(TOP)/guests/$(GUEST) -I$(TOP)/include $< -o $@
 
-loader.img: vmm.elf tracer.elf uartrx.elf fbcon.elf caiman.system
+loader.img: vmm.elf tracer.elf uartrx.elf fbcon.elf freezewatch.elf caiman.system
 	$(MICROKIT_TOOL) caiman.system --search-path . --board $(MICROKIT_BOARD) \
 		--config $(MICROKIT_CONFIG) -o $@ -r report.txt
 
@@ -172,4 +181,4 @@ libsddf_util_console.a: $(BASE_OBJS_LIBUTIL) console_putchar.o
 	$(AR) crv $@ $^
 	$(RANLIB) $@
 
--include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) uartrx.d fbcon.d harness/*.d linux/*.d
+-include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) uartrx.d fbcon.d freezewatch.d coresight.d harness/*.d linux/*.d

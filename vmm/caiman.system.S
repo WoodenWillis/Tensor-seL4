@@ -62,6 +62,29 @@
         <map mr="fbcon_ring" vaddr="0x4001c000" perms="rw" setvar_vaddr="fbcon_ring_vaddr" />
     </protection_domain>
 
+    <protection_domain name="freezewatch" priority="1" cpu="5">
+        <program_image path="freezewatch.elf" />
+        <map mr="uart" vaddr="0x30000000" perms="rw" cached="false" setvar_vaddr="uart_vaddr" />
+        <map mr="console_ring" vaddr="0x40000000" perms="r" setvar_vaddr="vmm_console_vaddr" />
+        <map mr="uartrx_console_ring" vaddr="0x40004000" perms="r" setvar_vaddr="uartrx_console_vaddr" />
+        <map mr="cs_dbg0" vaddr="0x50000000" perms="rw" cached="false" />
+        <map mr="cs_pmu0" vaddr="0x50001000" perms="rw" cached="false" />
+        <map mr="cs_dbg1" vaddr="0x50002000" perms="rw" cached="false" />
+        <map mr="cs_pmu1" vaddr="0x50003000" perms="rw" cached="false" />
+        <map mr="cs_dbg2" vaddr="0x50004000" perms="rw" cached="false" />
+        <map mr="cs_pmu2" vaddr="0x50005000" perms="rw" cached="false" />
+        <map mr="cs_dbg3" vaddr="0x50006000" perms="rw" cached="false" />
+        <map mr="cs_pmu3" vaddr="0x50007000" perms="rw" cached="false" />
+        <map mr="cs_dbg4" vaddr="0x50008000" perms="rw" cached="false" />
+        <map mr="cs_pmu4" vaddr="0x50009000" perms="rw" cached="false" />
+        <map mr="cs_dbg5" vaddr="0x5000a000" perms="rw" cached="false" />
+        <map mr="cs_pmu5" vaddr="0x5000b000" perms="rw" cached="false" />
+        <map mr="cs_dbg6" vaddr="0x5000c000" perms="rw" cached="false" />
+        <map mr="cs_pmu6" vaddr="0x5000d000" perms="rw" cached="false" />
+        <map mr="cs_dbg7" vaddr="0x5000e000" perms="rw" cached="false" />
+        <map mr="cs_pmu7" vaddr="0x5000f000" perms="rw" cached="false" />
+    </protection_domain>
+
     <protection_domain name="fbcon" priority="50" cpu="4">
         <program_image path="fbcon.elf" />
         <map mr="decon0" vaddr="0x30000000" perms="rw" cached="false" setvar_vaddr="decon_vaddr" />

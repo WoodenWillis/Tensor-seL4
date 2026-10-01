@@ -41,6 +41,8 @@ At cc3d599 (`logs/boot5.log`), the guest stalled mid-boot after `UDP hash table 
 
 e82c30a adds `pc-sample`, the vendor exynos-coresight PMUPCSR sequence, to see where CPU 3 is executing.
 
+At e82c30a (`logs/boot5.log`, third capture), three `guest-start`/`guest-stop` cycles in one boot all reached `init: hello from userspace`, so restarting with libvmm's un-reset vGIC works at least that far. The fourth run froze the whole system during early boot: the last line, after `dyndbg: Ignore empty _ddebug table`, was cut off mid-print, so the tracer stopped mid-line. A total freeze leaves nothing to type `pc-sample` on, because uartrx's output needs system calls and so the kernel lock. The `freezewatch` PD (CPU 5) makes no system calls after `init()`. When console output is pending and the UART transmitter has been idle for 3 s, it samples every core's PC through CoreSight and writes the result straight to the UART transmit register.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
