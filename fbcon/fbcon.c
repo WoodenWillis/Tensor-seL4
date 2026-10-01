@@ -65,27 +65,40 @@ static void log_hex(const char *msg, uint64_t val)
     microkit_dbg_puts("\n");
 }
 
-static bool read_geometry(void)
+static void read_size(void)
 {
     uint32_t img = reg_read(rdma_vaddr, RDMA_IMG_SIZE);
-    uint32_t base = reg_read(rdma_vaddr, RDMA_BASEADDR_P0);
 
+    log_hex("FBCON|INFO: RDMA0 IMG_SIZE ", img);
     width = RDMA_IMG_SIZE_W(img);
     height = RDMA_IMG_SIZE_H(img);
-    stride = reg_read(rdma_vaddr, RDMA_SRC_STRIDE_0) & RDMA_SRC_STRIDE_MASK;
-    log_hex("FBCON|INFO: RDMA0 BASEADDR_P0 ", base);
-    log_hex("FBCON|INFO: RDMA0 IMG_SIZE ", img);
-    log_hex("FBCON|INFO: RDMA0 SRC_STRIDE_0 ", stride);
-    if (base != ABL_FB_PHYS) {
-        log_hex("FBCON|ERROR: scanout is not the mapped framebuffer at ", ABL_FB_PHYS);
-        return false;
+    if (img == 0) {
+        microkit_dbg_puts("FBCON|INFO: IMG_SIZE reads 0; using 1280x2856\n");
+        width = DPU_DEFAULT_WIDTH;
+        height = DPU_DEFAULT_HEIGHT;
     }
+}
+
+static void read_stride(void)
+{
+    stride = reg_read(rdma_vaddr, RDMA_SRC_STRIDE_0) & RDMA_SRC_STRIDE_MASK;
+    log_hex("FBCON|INFO: RDMA0 SRC_STRIDE_0 ", stride);
+    if (stride == 0) {
+        stride = width == DPU_DEFAULT_WIDTH ? DPU_DEFAULT_STRIDE : width * 4;
+        log_hex("FBCON|INFO: SRC_STRIDE_0 reads 0; using ", stride);
+    }
+}
+
+static bool read_geometry(void)
+{
+    read_size();
+    read_stride();
     if (width == 0 || height == 0 || stride < width * 4 || stride % 4 != 0) {
         microkit_dbg_puts("FBCON|ERROR: RDMA0 geometry is not a 32-bit framebuffer\n");
         return false;
     }
-    if ((uint64_t)stride * height > ABL_FB_SIZE) {
-        log_hex("FBCON|ERROR: framebuffer is larger than the mapped ", ABL_FB_SIZE);
+    if ((uint64_t)stride * height > FBCON_FB_SIZE) {
+        log_hex("FBCON|ERROR: framebuffer is larger than our buffer of ", FBCON_FB_SIZE);
         return false;
     }
     cols = width / CELL_W;
@@ -140,6 +153,13 @@ static void present(void)
     reg_write(decon_vaddr, DECON_TRIG_CON,
               (trig & ~(TRIG_CON_HW_TRIG_EN | TRIG_CON_HW_TRIG_MASK)) | TRIG_CON_SW_TRIG_EN | TRIG_CON_SW_TRIG_DET_EN);
     reg_write(decon_vaddr, DECON_SHD_REG_UP_REQ, SHD_REG_UP_REQ_GLOBAL);
+}
+
+static void retarget_scanout(void)
+{
+    log_hex("FBCON|INFO: RDMA0 BASEADDR_P0 left by ABL ", reg_read(rdma_vaddr, RDMA_BASEADDR_P0));
+    reg_write(rdma_vaddr, RDMA_BASEADDR_P0, FBCON_FB_PHYS);
+    log_hex("FBCON|INFO: RDMA0 BASEADDR_P0 now ", reg_read(rdma_vaddr, RDMA_BASEADDR_P0));
 }
 
 static void start_decon(void)
@@ -270,6 +290,7 @@ void init(void)
         return;
     }
     clear_screen();
+    retarget_scanout();
     start_decon();
     present();
     ready = true;

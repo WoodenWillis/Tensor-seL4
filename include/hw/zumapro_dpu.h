@@ -6,9 +6,14 @@
 #define DECON0_PHYS             0x19470000
 #define DPU_RDMA0_PHYS          0x19900000
 
-/* attempt 1: ABL framebuffer, 16 MiB at 0xfac00000, 1280x2856x4 */
-#define ABL_FB_PHYS             0xfac00000
-#define ABL_FB_SIZE             0x1000000
+/* attempt 1: ABL framebuffer, 16 MiB */
+#define FBCON_FB_PHYS           0xfac00000
+#define FBCON_FB_SIZE           0x1000000
+
+/* attempt 1: caiman panel */
+#define DPU_DEFAULT_WIDTH       1280u
+#define DPU_DEFAULT_HEIGHT      2856u
+#define DPU_DEFAULT_STRIDE      5120u
 
 #define DECON_GLOBAL_CON        0x0020
 #define DECON_TRIG_CON          0x0030

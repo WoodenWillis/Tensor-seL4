@@ -64,3 +64,13 @@ What the trace shows:
 The trace doesn't record WFI/WFE traps or virtual interrupt delivery, so it can't tell a guest spinning at EL1 apart from a guest idling in WFI and waiting for an interrupt that never arrives.
 
 Seen again at ffcd608 (`logs/boot2.log`, not committed), and the stop is deterministic, not random. The last guest line is again `kvm [1]: HYP mode not available`. The dump again has 41827 records, 41824 of them from the guest, the same count as the first occurrence; the two differ only in printed timestamps. This build prints a VMM heartbeat once a second from the fault path, and none appeared. So after the stop the VMM received no fault of any kind: no WFI/WFE trap, and no virtual-timer VPPI event, although the guest's tick would produce one every few milliseconds. The guest isn't idling. Either it spins at EL1 without trapping, with no timer interrupt reaching the VMM, or CPU 0 isn't running it. In the boot that reached `/init`, the next line after `kvm` was `Initialise system trusted keyrings`.
+
+## Display state left by ABL differs between boots
+
+| | |
+|---|---|
+| First seen | 2026-10-01, the first boot with `fbcon` (3b7b2e3 + 8fd5281) |
+| Symptom | RDMA0's `BASEADDR_P0` read back an address other than `0xfac00000`, the framebuffer attempt 1 had seen. The value wasn't captured. `fbcon` refused to draw, and the panel kept ABL's Google logo |
+| Known variation (user, from attempt 1 and this boot) | The DECON command-mode pipeline is inherited from ABL, so its state isn't the same every boot. `RDMA_IMG_SIZE` can read back 0 (then the panel's 1280×2856 applies), and `RDMA_SRC_STRIDE_0` can read back 0 (then 5120, or width × 4 for another width) |
+
+`fbcon` now keeps ABL's pipeline but scans out of its own buffer. It points `BASEADDR_P0` at the 16 MiB at `0xfac00000` and logs the value ABL had left. The display's S2MPU (`dpuf0`) is still as ABL configured it. If a boot's configuration doesn't cover `0xfac00000`, the display's reads of our buffer would be blocked.
