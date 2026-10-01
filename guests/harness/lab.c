@@ -65,6 +65,11 @@ static uint64_t l2[ENTRIES] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t l3[ENTRIES] __attribute__((aligned(PAGE_SIZE)));
 static volatile uint32_t test_page[PAGE_SIZE / 4] __attribute__((aligned(PAGE_SIZE)));
 
+struct walk {
+    bool hw_updates;
+    bool broadcast;
+};
+
 static volatile uint64_t timer_irqs;
 static volatile uint64_t spurious_irqs;
 
@@ -149,12 +154,14 @@ static void timer_irqs_on(void)
     uart_puts("harness: virtual timer firing every 100 us\n");
 }
 
-static uint64_t test_desc_clean(void)
+static uint64_t test_desc(bool hw_updates)
 {
-    return (uint64_t)(uintptr_t)test_page | DESC_ATTR(ATTR_NORMAL) | DESC_SH_INNER | DESC_DBM | DESC_AP_RO | DESC_PAGE;
+    uint64_t desc = (uint64_t)(uintptr_t)test_page | DESC_ATTR(ATTR_NORMAL) | DESC_SH_INNER | DESC_PAGE;
+
+    return desc | (hw_updates ? (DESC_DBM | DESC_AP_RO) : DESC_AF);
 }
 
-static void build_page_tables(void)
+static void build_page_tables(bool hw_updates)
 {
     uintptr_t base = HARNESS_RAM_GPA;
 
@@ -164,16 +171,37 @@ static void build_page_tables(void)
     for (uint32_t i = 0; i < ENTRIES; i++) {
         l3[i] = (base + (uint64_t)i * PAGE_SIZE) | DESC_ATTR(ATTR_NORMAL) | DESC_SH_INNER | DESC_AF | DESC_PAGE;
     }
-    l3[((uintptr_t)test_page - base) / PAGE_SIZE] = test_desc_clean();
+    l3[((uintptr_t)test_page - base) / PAGE_SIZE] = test_desc(hw_updates);
 }
 
-static void mmu_on(void)
+static void put_reg(const char *name, uint64_t val)
+{
+    uart_puts("harness: ");
+    uart_puts(name);
+    uart_puts(" ");
+    uart_puthex64(val);
+    uart_puts("\n");
+}
+
+static void report_mmu_regs(void)
+{
+    uint64_t mmfr1, tcr, sctlr;
+
+    asm volatile("mrs %0, id_aa64mmfr1_el1" : "=r"(mmfr1));
+    asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
+    asm volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
+    put_reg("ID_AA64MMFR1_EL1", mmfr1);
+    put_reg("TCR_EL1", tcr);
+    put_reg("SCTLR_EL1", sctlr);
+}
+
+static void mmu_on(bool hw_updates)
 {
     uint64_t tcr = TCR_T0SZ_39BIT | TCR_IRGN0_WBWA | TCR_ORGN0_WBWA | TCR_SH0_INNER | TCR_EPD1 | TCR_IPS_40BIT |
-                   TCR_HA | TCR_HD;
+                   (hw_updates ? (TCR_HA | TCR_HD) : 0);
     uint64_t sctlr;
 
-    build_page_tables();
+    build_page_tables(hw_updates);
     asm volatile("dsb ish");
     asm volatile("msr mair_el1, %0" : : "r"(MAIR_VALUE));
     asm volatile("msr tcr_el1, %0" : : "r"(tcr));
@@ -182,7 +210,9 @@ static void mmu_on(void)
     asm volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
     sctlr |= SCTLR_M | SCTLR_C | SCTLR_I;
     asm volatile("msr sctlr_el1, %0\n\tisb" : : "r"(sctlr));
-    uart_puts("harness: MMU on, identity map, hardware AF and dirty updates on\n");
+    uart_puts("harness: MMU on, identity map, hardware AF and dirty updates ");
+    uart_puts(hw_updates ? "on\n" : "off\n");
+    report_mmu_regs();
 }
 
 static void tlbi_forever(uint64_t mode)
@@ -196,30 +226,61 @@ static void tlbi_forever(uint64_t mode)
     }
 }
 
-static void walk_round(uint64_t *slot, uint64_t va_page)
+static void invalidate_page(uint64_t va_page, bool broadcast)
 {
-    *(volatile uint64_t *)slot = test_desc_clean();
-    asm volatile("dsb ishst\n\ttlbi vaale1is, %0\n\tdsb ish\n\tisb" : : "r"(va_page) : "memory");
+    if (broadcast) {
+        asm volatile("dsb ishst\n\ttlbi vaale1is, %0\n\tdsb ish\n\tisb" : : "r"(va_page) : "memory");
+    } else {
+        asm volatile("dsb nshst\n\ttlbi vaale1, %0\n\tdsb nsh\n\tisb" : : "r"(va_page) : "memory");
+    }
+}
+
+static void walk_round(const struct walk *walk, uint64_t *slot, uint64_t va_page)
+{
+    *(volatile uint64_t *)slot = test_desc(walk->hw_updates);
+    invalidate_page(va_page, walk->broadcast);
     test_page[0] = test_page[0] + 1;
 }
 
-static void walk_forever(uint64_t mode)
+static void report_hw_update(const uint64_t *slot)
+{
+    uint64_t desc = *(volatile const uint64_t *)slot;
+
+    put_reg("test page descriptor", desc);
+    if ((desc & DESC_AF) && !(desc & DESC_AP_RO)) {
+        uart_puts("harness: hardware set AF and cleared the read-only bit\n");
+    } else {
+        uart_puts("harness: FAIL: the descriptor was not updated by hardware\n");
+    }
+}
+
+static void walk_forever(uint64_t mode, const struct walk *walk)
 {
     uint64_t *slot = &l3[((uintptr_t)test_page - HARNESS_RAM_GPA) / PAGE_SIZE];
     uint64_t va_page = (uint64_t)(uintptr_t)test_page >> 12;
-    bool hw_seen = false;
 
+    uart_puts(walk->broadcast ? "harness: broadcast tlbi\n" : "harness: local tlbi\n");
     for (uint64_t done = 0;;) {
         for (uint32_t i = 0; i < WALK_REPORT_EVERY; i++) {
-            walk_round(slot, va_page);
+            walk_round(walk, slot, va_page);
+        }
+        if (done == 0 && walk->hw_updates) {
+            report_hw_update(slot);
         }
         done += WALK_REPORT_EVERY;
-        if (!hw_seen && (*(volatile uint64_t *)slot & DESC_AF) && !(*(volatile uint64_t *)slot & DESC_AP_RO)) {
-            uart_puts("harness: hardware set AF and cleared the read-only bit\n");
-            hw_seen = true;
-        }
-        report(mode, done, " pte resets + broadcast tlbi + hardware AF/dirty updates");
+        report(mode, done, " pte resets + tlbi + touch");
     }
+}
+
+static void walk_with(uint64_t mode, bool timer, bool hw_updates, bool broadcast)
+{
+    const struct walk walk = { .hw_updates = hw_updates, .broadcast = broadcast };
+
+    mmu_on(hw_updates);
+    if (timer) {
+        timer_irqs_on();
+    }
+    walk_forever(mode, &walk);
 }
 
 void lab_run(uint64_t mode)
@@ -236,16 +297,22 @@ void lab_run(uint64_t mode)
         tlbi_forever(mode);
         break;
     case 3:
-        mmu_on();
-        walk_forever(mode);
+        walk_with(mode, false, true, true);
         break;
     case 4:
-        mmu_on();
-        timer_irqs_on();
-        walk_forever(mode);
+        walk_with(mode, true, true, true);
+        break;
+    case 5:
+        walk_with(mode, true, false, true);
+        break;
+    case 6:
+        walk_with(mode, true, true, false);
+        break;
+    case 7:
+        walk_with(mode, true, false, false);
         break;
     default:
-        uart_puts("harness: unknown mode; modes are 1 to 4\n");
+        uart_puts("harness: unknown mode; modes are 1 to 7\n");
         break;
     }
 }

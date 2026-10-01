@@ -85,6 +85,9 @@ The guest has no device mappings except its RAM. Every other access, and every S
 | 2 | Mode 1 with the virtual timer firing every 100 µs, through libvmm's vGIC |
 | 3 | MMU on (identity map), hardware Access-flag and dirty updates on (`TCR_EL1.HA/HD`). Each round resets one page's entry, broadcasts `tlbi vaale1is`, `dsb ish`, then loads and stores to that page. Reports every 100,000 |
 | 4 | Mode 3 with the timer interrupts |
+| 5 | Mode 4 without hardware updates: `TCR_EL1.HA/HD` off, the entry reset to an accessed, writable one |
+| 6 | Mode 4 with a local invalidation: `tlbi vaale1` + `dsb nsh` instead of the broadcast forms |
+| 7 | Mode 4 with neither: no hardware updates and a local invalidation |
 
 Either guest can be put on another core with a trailing `vcpu K`, for example `guest-start linux vcpu 2` or `guest-start harness 3 vcpu 1`. The lab VM has three vCPUs, each pinned to one core at build time, and only the chosen one runs:
 

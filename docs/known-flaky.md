@@ -69,6 +69,19 @@ At ad49b0c (`logs/boot7.log`, second boot in the file, lab build), the first `gu
 
 So the merged-pair theory is out: the X4 isn't a merged core, and its neighbours were idle. One run on the X4, one stall. Still untested: whether a guest other than Linux stalls (harness modes 1–4), and the A720.
 
+At 6efbcd6 (`logs/boot7.log`, third boot in the file), the harness reproduced the stall with no Linux involved. All four runs were on vCPU 2 (CPU 7, Cortex-X4), in one boot:
+
+| Mode | What ran | Result |
+|---|---|---|
+| 1 | broadcast `tlbi`, MMU off | 14,000,000 rounds, stopped by command |
+| 2 | mode 1 + timer interrupt every 100 µs | 10,000,000 rounds, 377,772 interrupts, stopped by command |
+| 3 | MMU on, `TCR_EL1.HA/HD` on, entry reset + broadcast `tlbi` + touch | at least 7,800,000 rounds, stopped by command |
+| 4 | mode 3 + timer interrupts | stalled after 2,400,000 rounds and about 82,000 interrupts |
+
+In the mode 4 stall, CPU 7 was at EL1 NS, PC `0x8000087c` in all five samples: the harness's `tlbi vaale1is`, with its `dsb ish` next. `gic-dump` showed INTIDs 25, 26 and 27 pending on CPU 7, nothing active, and INTID 27 disabled, so seL4 had taken a virtual-timer interrupt and was waiting for the VMM's acknowledgement. One run per mode, so modes 1 to 3 surviving is weak evidence; mode 4 stalling is not.
+
+Unexplained in the same runs: modes 3 and 4 never printed `hardware set AF and cleared the read-only bit`, and never took a fault either. After a round, the test page's descriptor was still the one the harness wrote (AF clear, read-only), yet the load and store succeeded. That fits a stage-1 MMU that isn't on, hardware updates that aren't happening, or a TLB entry that survived the invalidation. Not known which. The harness now prints `ID_AA64MMFR1_EL1`, `TCR_EL1`, `SCTLR_EL1` and the descriptor to tell, and modes 5 to 7 split mode 4 (see `docs/guest-linux.md`).
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot
