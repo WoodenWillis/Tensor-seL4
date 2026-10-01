@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /* docs/trace-format.md, version 3 */
-#define TRACE_VERSION               8
+#define TRACE_VERSION               9
 #define TRACE_MAGIC                 "SEL4TRC"
 #define TRACE_RECORD_SIZE           64
 #define TRACE_HEADER_SIZE           336

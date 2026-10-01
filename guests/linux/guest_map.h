@@ -4,6 +4,8 @@
 
 #define GUEST_NAME                  "linux"
 
+#define GUEST_NUM_VCPUS             1
+
 #define GUEST_RAM_GPA               0x80000000
 #define GUEST_RAM_SIZE              0x10000000
 

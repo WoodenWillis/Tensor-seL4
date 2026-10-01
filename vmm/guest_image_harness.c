@@ -15,7 +15,7 @@ bool guest_image_load(struct guest_boot *boot, uint64_t select)
 {
     size_t size = _guest_harness_image_end - _guest_harness_image;
 
-    if (select != GUEST_SELECT_DEFAULT && !GUEST_SELECT_IS_HARNESS(select)) {
+    if (GUEST_SELECT_GUEST(select) != GUEST_SELECT_DEFAULT && !GUEST_SELECT_IS_HARNESS(select)) {
         LOG_VMM_ERR("guest selection 0x%lx: this VMM carries only the harness\n", select);
         return false;
     }

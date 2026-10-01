@@ -105,11 +105,17 @@ linux/init.elf: linux/init.o
 linux/initrd.cpio: linux/init.elf $(TOP)/tools/mkcpio.py
 	python3 $(TOP)/tools/mkcpio.py $< $@
 
-linux/caiman-vm.dts: $(TOP)/guests/linux/caiman-vm.dts.S $(TOP)/guests/linux/guest_map.h linux/initrd.cpio
-	$(CC) -E -P -undef -x assembler-with-cpp -I$(TOP)/guests/linux \
+LINUX_DTBS_harness :=
+LINUX_DTBS_linux := linux/caiman-vm-0.dtb
+LINUX_DTBS_lab := linux/caiman-vm-0.dtb linux/caiman-vm-1.dtb linux/caiman-vm-2.dtb
+LINUX_DTBS := $(LINUX_DTBS_$(GUEST))
+LINUX_DTB_DEFINES := $(foreach n,0 1 2,$(if $(filter linux/caiman-vm-$(n).dtb,$(LINUX_DTBS)),-DGUEST_DTB$(n)_IMAGE_PATH=\"linux/caiman-vm-$(n).dtb\"))
+
+linux/caiman-vm-%.dts: $(TOP)/guests/linux/caiman-vm.dts.S $(TOP)/guests/$(GUEST)/guest_map.h linux/initrd.cpio
+	$(CC) -E -P -undef -x assembler-with-cpp -I$(TOP)/guests/$(GUEST) -DGUEST_BOOT_CPU=$* \
 		-DGUEST_INITRD_SIZE=$$(stat -c%s linux/initrd.cpio) $< -o $@
 
-linux/caiman-vm.dtb: linux/caiman-vm.dts
+linux/caiman-vm-%.dtb: linux/caiman-vm-%.dts
 	dtc -I dts -O dtb -o $@ $<
 
 vmm.o guest_control.o exynos_uart_emul.o mmio_forward.o mmio_trace.o smc_policy.o smc_trace.o trace_producer.o \
@@ -125,10 +131,10 @@ guest_image_linux_lab.o: $(TOP)/vmm/guest_image_linux.c
 images_harness.o: $(TOP)/vmm/images_harness.S harness/harness.bin
 	$(CC) -c -x assembler-with-cpp -DGUEST_HARNESS_IMAGE_PATH=\"harness/harness.bin\" $(ARCH_FLAGS) $< -o $@
 
-images_linux.o: $(TOP)/vmm/images_linux.S $(GUEST_KERNEL) linux/caiman-vm.dtb linux/initrd.cpio
+images_linux.o: $(TOP)/vmm/images_linux.S $(GUEST_KERNEL) $(LINUX_DTBS) linux/initrd.cpio
 	$(CC) -c -x assembler-with-cpp $(ARCH_FLAGS) \
 		-DGUEST_KERNEL_IMAGE_PATH=\"$(GUEST_KERNEL)\" \
-		-DGUEST_DTB_IMAGE_PATH=\"linux/caiman-vm.dtb\" \
+		$(LINUX_DTB_DEFINES) \
 		-DGUEST_INITRD_IMAGE_PATH=\"linux/initrd.cpio\" \
 		$< -o $@
 

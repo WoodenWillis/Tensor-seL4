@@ -86,4 +86,14 @@ The guest has no device mappings except its RAM. Every other access, and every S
 | 3 | MMU on (identity map), hardware Access-flag and dirty updates on (`TCR_EL1.HA/HD`). Each round resets one page's entry, broadcasts `tlbi vaale1is`, `dsb ish`, then loads and stores to that page. Reports every 100,000 |
 | 4 | Mode 3 with the timer interrupts |
 
+Either guest can be put on another core with a trailing `vcpu K`, for example `guest-start linux vcpu 2` or `guest-start harness 3 vcpu 1`. The lab VM has three vCPUs, each pinned to one core at build time, and only the chosen one runs:
+
+| vCPU | Core | Type |
+|---|---|---|
+| 0 (default) | CPU 3 | Cortex-A520 |
+| 1 | CPU 6 | Cortex-A720 |
+| 2 | CPU 7 | Cortex-X4 |
+
+The guest sees one CPU whose `MPIDR_EL1` is K. Linux gets a device tree with `cpu@K`, built once per vCPU, and uses the vGIC redistributor frame K. `GUEST=linux` and `GUEST=harness` builds have only vCPU 0, and refuse any other.
+
 Lab guest RAM is Linux's 256 MiB, and there's no watchdog forward, so harness mode 0 (the regression sequence) belongs in `GUEST=harness` builds.

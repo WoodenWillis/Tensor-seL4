@@ -5,7 +5,7 @@ import re
 import struct
 import sys
 
-VERSIONS = (0, 1, 2, 3, 4, 5, 6, 7, 8)
+VERSIONS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
 MAGIC = b"SEL4TRC\0"
 RECORD = struct.Struct("<QQQQQIHBBBB6xQ")
 HEADER = struct.Struct("<8sHHI16s32s48s48s48s64s64s")
@@ -26,6 +26,7 @@ KINDS_BY_VERSION = {
     6: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
     7: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
     8: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
+    9: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
 }
 
 MMIO_WRITE = 1 << 0
@@ -231,7 +232,7 @@ def decode(stream, out, console_tx):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Decode a trace format v0 to v8 serial log.")
+    parser = argparse.ArgumentParser(description="Decode a trace format v0 to v9 serial log.")
     parser.add_argument("log", nargs="?", type=argparse.FileType("r", errors="replace"), default=sys.stdin)
     parser.add_argument("--console-tx", type=lambda s: int(s, 0),
                         help="guest-physical address of a UART TX register to reassemble guest output from")

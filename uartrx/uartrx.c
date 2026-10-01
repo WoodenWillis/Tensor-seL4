@@ -157,7 +157,8 @@ static void cmd_help(uint64_t id, uint64_t verb)
     console_puts("  help         this list\n");
     console_puts("  ping         answers pong\n");
     console_puts("  trace-dump   print every trace record recorded so far\n");
-    console_puts("  guest-start [linux | harness N]  start a guest from a fresh image (refused while one runs)\n");
+    console_puts("  guest-start [linux | harness N] [vcpu K]  start a guest from a fresh image (refused while one runs)\n");
+    console_puts("               vcpu 0 = CPU 3 (A520), 1 = CPU 6 (A720), 2 = CPU 7 (X4); 1 and 2 only in the lab build\n");
     console_puts("  guest-stop   stop the running guest (refused if none is running)\n");
     console_puts("  status       show whether the guest is running, and why it stopped\n");
     console_puts("  guest-regs   print the guest vCPU's registers (stalls the vCPU's core)\n");
@@ -398,7 +399,7 @@ static bool parse_harness_mode(const char *s, size_t len, uint64_t *select)
     return true;
 }
 
-static bool parse_guest_select(const char *s, size_t len, uint64_t *select)
+static bool parse_guest_kind(const char *s, size_t len, uint64_t *select)
 {
     size_t word = token_len(s, len);
     size_t rest = word + skip_spaces(s + word, len - word);
@@ -415,6 +416,53 @@ static bool parse_guest_select(const char *s, size_t len, uint64_t *select)
         return parse_harness_mode(s + rest, len - rest, select);
     }
     return false;
+}
+
+static size_t find_word(const char *s, size_t len, const char *word)
+{
+    size_t at = 0;
+
+    while (at < len) {
+        size_t n = token_len(s + at, len - at);
+
+        if (word_is(s + at, n, word)) {
+            return at;
+        }
+        at += n + skip_spaces(s + at + n, len - at - n);
+    }
+    return len;
+}
+
+static size_t trim_spaces(const char *s, size_t len)
+{
+    while (len > 0 && s[len - 1] == ' ') {
+        len--;
+    }
+    return len;
+}
+
+static bool parse_vcpu(const char *s, size_t len, uint64_t *vcpu)
+{
+    size_t word = token_len(s, len);
+    size_t rest = word + skip_spaces(s + word, len - word);
+
+    *vcpu = 0;
+    if (len == 0) {
+        return true;
+    }
+    return parse_decimal(s + rest, len - rest, vcpu) && *vcpu <= GUEST_SELECT_VCPU(~0ull);
+}
+
+static bool parse_guest_select(const char *s, size_t len, uint64_t *select)
+{
+    size_t vcpu_at = find_word(s, len, "vcpu");
+    uint64_t vcpu = 0;
+
+    if (!parse_guest_kind(s, trim_spaces(s, vcpu_at), select) || !parse_vcpu(s + vcpu_at, len - vcpu_at, &vcpu)) {
+        return false;
+    }
+    *select |= vcpu << GUEST_SELECT_VCPU_SHIFT;
+    return true;
 }
 
 static bool parse_args(const struct command *cmd, const char *args, size_t len, uint64_t *arg)

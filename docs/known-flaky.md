@@ -58,6 +58,10 @@ At d42d375 (`logs/boot6.log`), `tlbi-stress` was typed while a guest was booting
 
 So once the guest's core is in this state, broadcast TLB invalidation from any core never completes, seL4's own included. Checked and ruled out: stage-2 guest RAM is `S2_NORMAL` (write-back) and Inner Shareable, and `VTCR_EL2` walks are write-back and Inner Shareable. With no guest running (b5bc63e, `logs/boot6.log`), `tlbi-stress` completed all 10,000,000 broadcast invalidations from CPU 2. The worst `tlbi`+`dsb` took 133 ticks (about 5.4 µs). Broadcast invalidation works on this SoC until a guest's core gets into the stuck state.
 
+At c8cde82 (`logs/boot7.log`, lab build, Linux guest), another stall, and this time not at a TLB invalidation. `freezewatch` fired on its unread-receive trigger, and CPU 3 was at guest PC `0xffffffc0083bae20`, EL1 NS: an ordinary store, `stp xzr, x20, [x19, #96]`. So the core can stop on a plain memory write. The `dsb ish` captures are one place it shows, not the cause.
+
+Every stall so far had a Linux guest running on a Cortex-A520: CPU 0, then CPU 3. The vendor DTB's ECC handler names the A520s as merged pairs ("Core0-1 Complex", "Core2-3 Complex"), and in both placements the guest's pair partner was busy with another PD (the tracer on CPU 1, then uartrx on CPU 2). Not yet tested: whether the stall needs an A520, and whether it needs Linux. The lab build now has three vCPUs, and `guest-start … vcpu K` picks the core: 0 is CPU 3 (A520), 1 is CPU 6 (A720), 2 is CPU 7 (X4). Harness modes 1–4 on the same cores cover the second question.
+
 The VMM (priority 254) and the guest vCPU (priority 0) share CPU 0, so a guest spinning without trapping cannot starve the VMM. The VMM answered commands before `guest-start` in the same boots. Something keeps CPU 0 from running the VMM's notification handler. Not yet explained.
 
 ## Linux guest: whole system freezes during boot

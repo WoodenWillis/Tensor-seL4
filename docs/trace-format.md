@@ -92,7 +92,7 @@ One non-empty command line typed on the console (see "Host commands" below). Pro
 | addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status`, 7 `guest-regs` (v4), 8 `gic-dump` (v5), 9 `pc-sample` (v6), 10 `tlbi-stress` (v7) |
 | value | The line's number: 1 for the first command typed after boot, then 2, 3, … |
 | flags | Bit 0 ACCEPTED. Bit 1 REJECTED_ARGS (known command, arguments it doesn't take; v8). Bit 2 REJECTED_VERB (unknown command). Exactly one is set. |
-| pc | v8: the argument. For `guest-start`: 0 the build's default guest, 0x1 `linux`, 0x100 + N `harness N`. 0 otherwise |
+| pc | v8: the argument. For `guest-start`: bits 15:0 are the guest (0 the build's default, 0x1 `linux`, 0x100 + N `harness N`); since v9, bits 23:16 are the vCPU from `vcpu K` (0 if not given). 0 otherwise |
 
 Empty lines produce no record.
 
@@ -140,6 +140,7 @@ STARTED is recorded before the vCPU runs, so it precedes every record of that ru
 | 6 | Adds the CMD verb 9 `pc-sample`. Kinds and layouts unchanged. Lines `TRH6` / `TRC6`. |
 | 7 | Adds the CMD verb 10 `tlbi-stress`. Kinds and layouts unchanged. Lines `TRH7` / `TRC7`. |
 | 8 | CMD records carry the command's argument in `pc`, and a REJECTED_ARGS flag (bit 1). `guest-start` takes `linux` or `harness N`. Layouts unchanged. Lines `TRH8` / `TRC8`. |
+| 9 | The `guest-start` argument carries the vCPU in bits 23:16 (`vcpu K`). Layouts unchanged. Lines `TRH9` / `TRC9`. |
 
 ## Host commands
 
@@ -148,7 +149,7 @@ STARTED is recorded before the vCPU runs, so it precedes every record of that ru
 - Type a command and press Enter. CR, LF and CRLF all end a line. Backspace works, and what you type is echoed. A `> ` prompt means it's ready.
 - Commands: `help`, `ping` (answers `pong`), `trace-dump` (prints the archive), `gic-dump` (the kernel prints every core's current thread and GIC redistributor state; debug kernel only, seL4 patch 0006, temporary), `pc-sample` (samples every core's PC, exception level and security state through its CoreSight PMU block, using the vendor exynos-coresight sequence; unlocks the debug and PMU lock registers to do so; temporary), `tlbi-stress` (10 million `tlbi vaale1is` + `dsb ish` from CPU 2 inside the kernel, in batches of 10,000, reporting the worst single latency; debug kernel only, seL4 patch 0008, temporary), and the guest controls below. Guest commands are run by the VMM; the prompt comes back when the VMM has finished, or after 2 s with a warning.
 
-The VMM no longer starts the guest at boot. It waits for `guest-start`:
+The VMM no longer starts the guest at boot. It waits for `guest-start`, which takes an optional guest (`linux`, `harness N`; v8) and an optional `vcpu K` (v9; see `docs/guest-linux.md`):
 
 | Command | not started | running | stopped (by command, by fault, or failed to start) |
 |---|---|---|---|

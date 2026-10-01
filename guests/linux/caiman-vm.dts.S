@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: BSD-2-Clause */
 
-#include "guest_map.h"
+#include <guest_map.h>
 
 /dts-v1/;
 
@@ -14,10 +14,10 @@
         #address-cells = <1>;
         #size-cells = <0>;
 
-        cpu@0 {
+        cpu@GUEST_BOOT_CPU {
             device_type = "cpu";
             compatible = "arm,armv8";
-            reg = <0x0>;
+            reg = <GUEST_BOOT_CPU>;
             enable-method = "psci";
         };
     };
@@ -37,7 +37,7 @@
         #interrupt-cells = <3>;
         interrupt-controller;
         reg = <0x0 GUEST_GICD_GPA 0x0 0x10000>,
-              <0x0 GUEST_GICR_GPA 0x0 0x20000>;
+              <0x0 GUEST_GICR_GPA 0x0 (0x20000 * GUEST_NUM_VCPUS)>;
     };
 
     timer {

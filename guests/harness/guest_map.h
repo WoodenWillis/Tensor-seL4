@@ -6,6 +6,8 @@
 
 #define GUEST_NAME                  "harness"
 
+#define GUEST_NUM_VCPUS             1
+
 #define GUEST_RAM_GPA               HARNESS_RAM_GPA
 #define GUEST_RAM_SIZE              HARNESS_RAM_SIZE
 

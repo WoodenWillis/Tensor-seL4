@@ -11,7 +11,10 @@
 #define GUEST_SELECT_LINUX          0x1ull
 #define GUEST_SELECT_HARNESS        0x100ull
 #define GUEST_SELECT_HARNESS_MODE(s) ((s) & 0xffull)
-#define GUEST_SELECT_IS_HARNESS(s)  (((s) & ~0xffull) == GUEST_SELECT_HARNESS)
+#define GUEST_SELECT_VCPU_SHIFT     16
+#define GUEST_SELECT_VCPU(s)        (((s) >> GUEST_SELECT_VCPU_SHIFT) & 0xffull)
+#define GUEST_SELECT_GUEST(s)       ((s) & 0xffffull)
+#define GUEST_SELECT_IS_HARNESS(s)  ((GUEST_SELECT_GUEST(s) & ~0xffull) == GUEST_SELECT_HARNESS)
 
 struct cmd_entry {
     uint64_t id;

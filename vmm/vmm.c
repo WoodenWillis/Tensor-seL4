@@ -41,7 +41,7 @@ void init(void)
     trace_producer_init(trace_ring_vaddr, CH_TRACER, TRACE_PRODUCER_VMM);
 
     arch_guest_init_t args = {
-        .num_vcpus = 1,
+        .num_vcpus = GUEST_NUM_VCPUS,
         .num_guest_ram_regions = 1,
         .guest_ram_regions = { (struct guest_ram_region) {
             .gpa_start = GUEST_RAM_GPA, .size = GUEST_RAM_SIZE, .vmm_vaddr = (void *)guest_ram_vaddr } },

@@ -9,7 +9,9 @@
 
 /* libvmm vGICv3 at the physical GIC's addresses */
 #define GICD_BASE               0x10400000u
-#define GICR_SGI_BASE           0x10450000u
+#define GICR_BASE               0x10440000u
+#define GICR_FRAME_SIZE         0x20000u
+#define GICR_SGI_OFFSET         0x10000u
 #define GICD_CTLR               0x0000u
 #define GICD_CTLR_ENABLE_G1NS   (1u << 1)
 #define GICD_CTLR_ARE_NS        (1u << 4)
@@ -119,6 +121,14 @@ void lab_bad_exception(uint64_t vector, uint64_t esr, uint64_t elr, uint64_t far
     }
 }
 
+static uintptr_t gicr_sgi_base(void)
+{
+    uint64_t mpidr;
+
+    asm volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
+    return GICR_BASE + (uintptr_t)(mpidr & 0xff) * GICR_FRAME_SIZE + GICR_SGI_OFFSET;
+}
+
 static void gic_cpu_interface_on(void)
 {
     asm volatile("msr S3_0_C12_C12_5, %0\n\tisb" : : "r"(7ull));
@@ -131,7 +141,7 @@ static void timer_irqs_on(void)
 {
     asm volatile("msr vbar_el1, %0\n\tisb" : : "r"(lab_vectors));
     mmio_write32(GICD_BASE + GICD_CTLR, GICD_CTLR_ARE_NS | GICD_CTLR_ENABLE_G1NS);
-    mmio_write32(GICR_SGI_BASE + GICR_ISENABLER0, 1u << VTIMER_INTID);
+    mmio_write32(gicr_sgi_base() + GICR_ISENABLER0, 1u << VTIMER_INTID);
     gic_cpu_interface_on();
     asm volatile("msr cntv_tval_el0, %0" : : "r"((uint64_t)TIMER_PERIOD_TICKS));
     asm volatile("msr cntv_ctl_el0, %0\n\tisb" : : "r"(1ull));
