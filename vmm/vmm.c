@@ -69,7 +69,7 @@ static void run_command(const struct cmd_entry *cmd)
 {
     switch (cmd->verb) {
     case TRACE_CMD_VERB_GUEST_START:
-        guest_control_start();
+        guest_control_start(cmd->arg);
         break;
     case TRACE_CMD_VERB_GUEST_STOP:
         guest_control_stop();

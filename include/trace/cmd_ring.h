@@ -7,9 +7,16 @@
 #define CMD_RING_SIZE      0x1000
 #define CMD_RING_CAPACITY  64
 
+#define GUEST_SELECT_DEFAULT        0x0ull
+#define GUEST_SELECT_LINUX          0x1ull
+#define GUEST_SELECT_HARNESS        0x100ull
+#define GUEST_SELECT_HARNESS_MODE(s) ((s) & 0xffull)
+#define GUEST_SELECT_IS_HARNESS(s)  (((s) & ~0xffull) == GUEST_SELECT_HARNESS)
+
 struct cmd_entry {
     uint64_t id;
     uint64_t verb;
+    uint64_t arg;
 };
 
 enum vmm_phase {

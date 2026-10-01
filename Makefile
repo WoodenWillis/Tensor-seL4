@@ -51,6 +51,7 @@ $(HELLO)/loader.img: $(SDK_LOADER)
 
 GUEST_DEPS_harness :=
 GUEST_DEPS_linux := $(GKI_IMAGE)
+GUEST_DEPS_lab := $(GKI_IMAGE)
 
 $(GKI_IMAGE): tools/extract-gki.py
 	python3 tools/extract-gki.py $@

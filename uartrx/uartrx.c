@@ -35,6 +35,7 @@ static size_t line_len;
 static uint32_t line_errors;
 static bool last_was_cr;
 static uint64_t commands_received;
+static uint64_t command_arg;
 
 static uint32_t uart_read(uint32_t reg)
 {
@@ -156,7 +157,7 @@ static void cmd_help(uint64_t id, uint64_t verb)
     console_puts("  help         this list\n");
     console_puts("  ping         answers pong\n");
     console_puts("  trace-dump   print every trace record recorded so far\n");
-    console_puts("  guest-start  start the guest from a fresh image (refused while it runs)\n");
+    console_puts("  guest-start [linux | harness N]  start a guest from a fresh image (refused while one runs)\n");
     console_puts("  guest-stop   stop the running guest (refused if none is running)\n");
     console_puts("  status       show whether the guest is running, and why it stopped\n");
     console_puts("  guest-regs   print the guest vCPU's registers (stalls the vCPU's core)\n");
@@ -243,7 +244,7 @@ static void cmd_to_vmm(uint64_t id, uint64_t verb)
         console_puts("UARTRX|ERROR: the VMM has too many commands queued; command dropped\n");
         return;
     }
-    ring->entries[head % CMD_RING_CAPACITY] = (struct cmd_entry) { .id = id, .verb = verb };
+    ring->entries[head % CMD_RING_CAPACITY] = (struct cmd_entry) { .id = id, .verb = verb, .arg = command_arg };
     __atomic_store_n(&ring->head, head + 1, __ATOMIC_RELEASE);
     microkit_notify(VMM_CH);
     if (!wait_for_vmm(ring, id)) {
@@ -337,9 +338,10 @@ static const struct command *lookup(const char *verb, size_t len)
     return NULL;
 }
 
-static void record_command(uint64_t verb, uint64_t id, uint8_t flags)
+static void record_command(uint64_t verb, uint64_t id, uint8_t flags, uint64_t arg)
 {
     struct trace_record rec = {
+        .pc = arg,
         .addr = verb,
         .value = id,
         .kind = TRACE_KIND_CMD,
@@ -358,6 +360,72 @@ static void report_line_errors(void)
     }
 }
 
+static size_t skip_spaces(const char *s, size_t len)
+{
+    size_t n = 0;
+
+    while (n < len && s[n] == ' ') {
+        n++;
+    }
+    return n;
+}
+
+static bool parse_decimal(const char *s, size_t len, uint64_t *out)
+{
+    uint64_t val = 0;
+
+    if (len == 0) {
+        return false;
+    }
+    for (size_t i = 0; i < len; i++) {
+        if (s[i] < '0' || s[i] > '9') {
+            return false;
+        }
+        val = val * 10 + (uint64_t)(s[i] - '0');
+    }
+    *out = val;
+    return true;
+}
+
+static bool parse_harness_mode(const char *s, size_t len, uint64_t *select)
+{
+    uint64_t mode = 0;
+
+    if (len != 0 && (!parse_decimal(s, len, &mode) || mode > GUEST_SELECT_HARNESS_MODE(~0ull))) {
+        return false;
+    }
+    *select = GUEST_SELECT_HARNESS | mode;
+    return true;
+}
+
+static bool parse_guest_select(const char *s, size_t len, uint64_t *select)
+{
+    size_t word = token_len(s, len);
+    size_t rest = word + skip_spaces(s + word, len - word);
+
+    if (len == 0) {
+        *select = GUEST_SELECT_DEFAULT;
+        return true;
+    }
+    if (word_is(s, word, "linux") && rest == len) {
+        *select = GUEST_SELECT_LINUX;
+        return true;
+    }
+    if (word_is(s, word, "harness")) {
+        return parse_harness_mode(s + rest, len - rest, select);
+    }
+    return false;
+}
+
+static bool parse_args(const struct command *cmd, const char *args, size_t len, uint64_t *arg)
+{
+    *arg = 0;
+    if (cmd->verb == TRACE_CMD_VERB_GUEST_START) {
+        return parse_guest_select(args, len, arg);
+    }
+    return len == 0;
+}
+
 static void run_line(const char *s, size_t len)
 {
     while (len > 0 && s[0] == ' ') {
@@ -372,14 +440,21 @@ static void run_line(const char *s, size_t len)
     }
 
     uint64_t id = ++commands_received;
-    const struct command *cmd = lookup(s, token_len(s, len));
+    size_t verb_len = token_len(s, len);
+    size_t args_at = verb_len + skip_spaces(s + verb_len, len - verb_len);
+    const struct command *cmd = lookup(s, verb_len);
 
     if (cmd == NULL) {
-        record_command(TRACE_CMD_VERB_NONE, id, TRACE_CMD_REJECTED_VERB);
+        record_command(TRACE_CMD_VERB_NONE, id, TRACE_CMD_REJECTED_VERB, 0);
         console_puts("unknown command; type help\n");
         return;
     }
-    record_command(cmd->verb, id, TRACE_CMD_ACCEPTED);
+    if (!parse_args(cmd, s + args_at, len - args_at, &command_arg)) {
+        record_command(cmd->verb, id, TRACE_CMD_REJECTED_ARGS, 0);
+        console_puts("bad arguments; type help\n");
+        return;
+    }
+    record_command(cmd->verb, id, TRACE_CMD_ACCEPTED, command_arg);
     cmd->run(id, cmd->verb);
 }
 

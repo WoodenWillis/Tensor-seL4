@@ -6,7 +6,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void guest_control_start(void);
+void guest_control_start(uint64_t select);
 void guest_control_stop(void);
 void guest_control_status(void);
 void guest_control_regs(void);

@@ -17,8 +17,8 @@ A dump is written to the serial console with `microkit_dbg_puts`. That output ex
 
 | Prefix | Payload | Meaning |
 |---|---|---|
-| `TRH7 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
-| `TRC7 ` | 128 lowercase hex characters (64 bytes) | One record. |
+| `TRH8 ` | 672 lowercase hex characters (336 bytes) | Stream header. Sent before the first record of a dump and again every 64 records. All copies are identical. |
+| `TRC8 ` | 128 lowercase hex characters (64 bytes) | One record. |
 
 The header is repeated because it's the one line whose loss would make the whole trace undecodable. Kernel debug output isn't serialised across cores. On the first v2 boot, the monitor's `MON|INFO: Microkit Monitor started!` on core 0 interleaved character by character with the tracer's first header on core 1. The decoder uses the first valid header copy, holds any records that arrive before it, and treats a later copy that differs as an error.
 
@@ -85,13 +85,14 @@ Registers x0–x7 are recorded. That's everything seL4's SMC forwarding passes t
 
 ### kind 5: CMD
 
-One non-empty command line typed on the console (see "Host commands" below). Produced by `uartrx`. `pc`, `esr`, `vcpu` and `size` are 0.
+One non-empty command line typed on the console (see "Host commands" below). Produced by `uartrx`. `esr`, `vcpu` and `size` are 0. Since v8, `pc` carries the command's parsed argument (0 if it has none).
 
 | Field | Contents |
 |---|---|
 | addr | Verb: 0 unknown, 1 `ping`, 2 `trace-dump`, 3 `help`, 4 `guest-start`, 5 `guest-stop`, 6 `status`, 7 `guest-regs` (v4), 8 `gic-dump` (v5), 9 `pc-sample` (v6), 10 `tlbi-stress` (v7) |
 | value | The line's number: 1 for the first command typed after boot, then 2, 3, … |
-| flags | Bit 0 ACCEPTED. Bit 2 REJECTED_VERB (unknown command). Exactly one is set. Bit 1 is unused. |
+| flags | Bit 0 ACCEPTED. Bit 1 REJECTED_ARGS (known command, arguments it doesn't take; v8). Bit 2 REJECTED_VERB (unknown command). Exactly one is set. |
+| pc | v8: the argument. For `guest-start`: 0 the build's default guest, 0x1 `linux`, 0x100 + N `harness N`. 0 otherwise |
 
 Empty lines produce no record.
 
@@ -138,6 +139,7 @@ STARTED is recorded before the vCPU runs, so it precedes every record of that ru
 | 5 | Adds the CMD verb 8 `gic-dump`. Kinds and layouts unchanged. Lines `TRH5` / `TRC5`. |
 | 6 | Adds the CMD verb 9 `pc-sample`. Kinds and layouts unchanged. Lines `TRH6` / `TRC6`. |
 | 7 | Adds the CMD verb 10 `tlbi-stress`. Kinds and layouts unchanged. Lines `TRH7` / `TRC7`. |
+| 8 | CMD records carry the command's argument in `pc`, and a REJECTED_ARGS flag (bit 1). `guest-start` takes `linux` or `harness N`. Layouts unchanged. Lines `TRH8` / `TRC8`. |
 
 ## Host commands
 

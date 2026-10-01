@@ -5,7 +5,7 @@ import re
 import struct
 import sys
 
-VERSIONS = (0, 1, 2, 3, 4, 5, 6, 7)
+VERSIONS = (0, 1, 2, 3, 4, 5, 6, 7, 8)
 MAGIC = b"SEL4TRC\0"
 RECORD = struct.Struct("<QQQQQIHBBBB6xQ")
 HEADER = struct.Struct("<8sHHI16s32s48s48s48s64s64s")
@@ -25,6 +25,7 @@ KINDS_BY_VERSION = {
     5: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
     6: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
     7: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
+    8: {KIND_MMIO, KIND_SMC_ENTER, KIND_SMC_REGS, KIND_SMC_EXIT, KIND_CMD, KIND_GUEST},
 }
 
 MMIO_WRITE = 1 << 0
@@ -37,6 +38,7 @@ SMC_UNHANDLED = 1 << 2
 
 CMD_ACCEPTED = 1 << 0
 CMD_REJECTED_VERB = 1 << 2
+CMD_REJECTED_ARGS = 1 << 1
 CMD_VERBS = {0: "-", 1: "ping", 2: "trace-dump", 3: "help", 4: "guest-start", 5: "guest-stop", 6: "status", 7: "guest-regs", 8: "gic-dump", 9: "pc-sample", 10: "tlbi-stress"}
 GUEST_EVENTS = {1: "STARTED", 2: "STOPPED_BY_COMMAND", 3: "STOPPED_BY_FAULT"}
 
@@ -100,10 +102,13 @@ def format_cmd(rec):
         how = "ACCEPTED"
     elif flags & CMD_REJECTED_VERB:
         how = "REJECTED_VERB"
+    elif flags & CMD_REJECTED_ARGS:
+        how = "REJECTED_ARGS"
     else:
         how = f"flags=0x{flags:x}"
     verb = CMD_VERBS.get(rec["addr"], f"verb{rec['addr']}")
-    return f"seq={rec['seq']} t={rec['time']} p{rec['producer']} CMD id={rec['value']} {verb} {how}"
+    arg = f" arg=0x{rec['pc']:x}" if rec["pc"] else ""
+    return f"seq={rec['seq']} t={rec['time']} p{rec['producer']} CMD id={rec['value']} {verb}{arg} {how}"
 
 
 def format_guest(rec):
@@ -226,7 +231,7 @@ def decode(stream, out, console_tx):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Decode a trace format v0 to v7 serial log.")
+    parser = argparse.ArgumentParser(description="Decode a trace format v0 to v8 serial log.")
     parser.add_argument("log", nargs="?", type=argparse.FileType("r", errors="replace"), default=sys.stdin)
     parser.add_argument("--console-tx", type=lambda s: int(s, 0),
                         help="guest-physical address of a UART TX register to reassemble guest output from")

@@ -44,11 +44,11 @@ static void trace_guest_event(uint64_t event, uintptr_t pc)
     trace_emit(&rec);
 }
 
-static bool boot_fresh(void)
+static bool boot_fresh(uint64_t select)
 {
     struct guest_boot boot;
 
-    if (!guest_image_load(&boot)) {
+    if (!guest_image_load(&boot, select)) {
         state = GUEST_START_FAILED;
         return false;
     }
@@ -66,14 +66,14 @@ static bool boot_fresh(void)
     return true;
 }
 
-void guest_control_start(void)
+void guest_control_start(uint64_t select)
 {
     if (state == GUEST_RUNNING) {
         LOG_VMM("guest-start refused: run %lu is already running (use guest-stop first)\n", run);
         return;
     }
-    if (boot_fresh()) {
-        LOG_VMM("run %lu started from a fresh %s image\n", run, GUEST_NAME);
+    if (boot_fresh(select)) {
+        LOG_VMM("run %lu started from a fresh %s image\n", run, guest_image_name(select));
     }
 }
 

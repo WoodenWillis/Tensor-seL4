@@ -71,3 +71,19 @@ It writes to `/dev/kmsg` and not to fd 1 because the kernel's built-in `CONFIG_C
 Once `/init` blocks, the kernel has nothing to run and sits in `cpu_do_idle()` (`dsb sy; wfi` at `0xffffffc008fe8c80` in this Image). Every `wfi` traps to the VMM (seL4 sets `HCR_EL2.TWI`/`TWE` for guests), and libvmm answers without advancing the PC, so an idle guest keeps trapping WFI until an interrupt is pending.
 
 The guest has no device mappings except its RAM. Every other access, and every SMC, traps to the VMM. Whatever the VMM doesn't handle stops the guest and is reported by `status`.
+
+## Lab build
+
+`make GUEST=lab` builds a VMM that carries both the Linux guest and the bare-metal harness, so several experiments can run in one boot:
+
+- `guest-start linux` (or plain `guest-start`) boots Linux as above.
+- `guest-start harness N` boots the harness in mode N. The VMM passes N in `x0`.
+
+| Mode | What the harness does, at EL1 on the guest's core under stage 2 |
+|---|---|
+| 1 | `tlbi vaale1is, xzr` + `dsb ish` forever, MMU off, interrupts masked. Reports every 1,000,000 |
+| 2 | Mode 1 with the virtual timer firing every 100 µs, through libvmm's vGIC |
+| 3 | MMU on (identity map), hardware Access-flag and dirty updates on (`TCR_EL1.HA/HD`). Each round resets one page's entry, broadcasts `tlbi vaale1is`, `dsb ish`, then loads and stores to that page. Reports every 100,000 |
+| 4 | Mode 3 with the timer interrupts |
+
+Lab guest RAM is Linux's 256 MiB, and there's no watchdog forward, so harness mode 0 (the regression sequence) belongs in `GUEST=harness` builds.

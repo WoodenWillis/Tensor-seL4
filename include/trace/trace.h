@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 /* docs/trace-format.md, version 3 */
-#define TRACE_VERSION               7
+#define TRACE_VERSION               8
 #define TRACE_MAGIC                 "SEL4TRC"
 #define TRACE_RECORD_SIZE           64
 #define TRACE_HEADER_SIZE           336
@@ -30,6 +30,7 @@
 #define TRACE_SMC_UNHANDLED         (1u << 2)
 
 #define TRACE_CMD_ACCEPTED          (1u << 0)
+#define TRACE_CMD_REJECTED_ARGS     (1u << 1)
 #define TRACE_CMD_REJECTED_VERB     (1u << 2)
 
 #define TRACE_CMD_VERB_NONE         0

@@ -21,12 +21,16 @@ static void zero_guest_ram(void)
     cache_clean_and_invalidate(guest_ram_vaddr, guest_ram_vaddr + GUEST_RAM_SIZE);
 }
 
-bool guest_image_load(struct guest_boot *boot)
+bool guest_image_load(struct guest_boot *boot, uint64_t select)
 {
     size_t kernel_size = _guest_kernel_image_end - _guest_kernel_image;
     size_t dtb_size = _guest_dtb_image_end - _guest_dtb_image;
     size_t initrd_size = _guest_initrd_image_end - _guest_initrd_image;
 
+    if (select != GUEST_SELECT_DEFAULT && select != GUEST_SELECT_LINUX) {
+        LOG_VMM_ERR("guest selection 0x%lx: this VMM carries only Linux\n", select);
+        return false;
+    }
     zero_guest_ram();
     uintptr_t pc = linux_setup_images(GUEST_RAM_GPA, (uintptr_t)_guest_kernel_image, kernel_size,
                                       (uintptr_t)_guest_dtb_image, GUEST_DTB_GPA, dtb_size,
@@ -37,4 +41,9 @@ bool guest_image_load(struct guest_boot *boot)
     }
     *boot = (struct guest_boot) { .pc = pc, .dtb = GUEST_DTB_GPA, .initrd = GUEST_INITRD_GPA };
     return true;
+}
+
+const char *guest_image_name(uint64_t select)
+{
+    return "linux";
 }
