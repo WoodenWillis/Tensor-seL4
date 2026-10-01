@@ -135,8 +135,16 @@ uartrx.o: $(TOP)/uartrx/uartrx.c
 uartrx.elf: $(UARTRX_OBJS) libsddf_util_debug.a
 	$(LD) $(LDFLAGS) $(UARTRX_OBJS) $(TRACER_LIBS) -o $@
 
-fbcon.o: $(TOP)/fbcon/fbcon.c
-	$(CC) $(CFLAGS) -c -o $@ $<
+ifeq ($(strip $(SPLEEN_FONT_DIR)),)
+$(error SPLEEN_FONT_DIR must be set; run inside the Nix dev shell)
+endif
+FBCON_FONT ?= spleen-12x24
+
+fbcon_font.h: $(SPLEEN_FONT_DIR)/$(FBCON_FONT).bdf $(TOP)/tools/bdf2c.py
+	python3 $(TOP)/tools/bdf2c.py $< $@
+
+fbcon.o: $(TOP)/fbcon/fbcon.c fbcon_font.h
+	$(CC) $(CFLAGS) -I. -c -o $@ $<
 
 fbcon.elf: fbcon.o libsddf_util_debug.a
 	$(LD) $(LDFLAGS) fbcon.o $(TRACER_LIBS) -o $@

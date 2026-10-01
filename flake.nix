@@ -71,6 +71,7 @@
 
             LIBCLANG_PATH = "${pkgs.llvmPackages_18.libclang.lib}/lib";
             CLANG_RESOURCE_DIR = "${pkgs.llvmPackages_18.clang-unwrapped.lib}/lib/clang/18";
+            SPLEEN_FONT_DIR = "${pkgs.spleen}/share/fonts/misc";
           };
         });
     };

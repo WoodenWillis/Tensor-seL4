@@ -9,12 +9,13 @@
 #include <hw/zumapro_dpu.h>
 #include <trace/console_ring.h>
 
-#include "font8x8_basic.h"
+#include "fbcon_font.h"
 
 #define TRACER_CH 1
 
-#define SCALE 2u
-#define CELL (8u * SCALE)
+#define SCALE 1u
+#define CELL_W (FONT_W * SCALE)
+#define CELL_H (FONT_H * SCALE)
 #define FG 0xffffffffu
 #define BG 0xff000000u
 #define TAB_WIDTH 4u
@@ -87,8 +88,8 @@ static bool read_geometry(void)
         log_hex("FBCON|ERROR: framebuffer is larger than the mapped ", ABL_FB_SIZE);
         return false;
     }
-    cols = width / CELL;
-    rows = height / CELL;
+    cols = width / CELL_W;
+    rows = height / CELL_H;
     if (cols > MAX_COLS || rows > MAX_ROWS) {
         microkit_dbg_puts("FBCON|ERROR: text grid exceeds MAX_COLS x MAX_ROWS\n");
         return false;
@@ -101,16 +102,22 @@ static volatile uint32_t *pixel_row(uint32_t y)
     return (volatile uint32_t *)(fb_vaddr + (uintptr_t)y * stride);
 }
 
-static void draw_glyph(uint32_t col, uint32_t row, char ch)
+static const uint32_t *glyph_of(char ch)
 {
     unsigned char c = (unsigned char)ch;
-    const uint8_t *glyph = font8x8[(c >= 0x20 && c < 0x80) ? c - 0x20 : 0];
 
-    for (uint32_t gy = 0; gy < 8; gy++) {
+    return font_rows[(c >= FONT_FIRST && c <= FONT_LAST) ? c - FONT_FIRST : 0];
+}
+
+static void draw_glyph(uint32_t col, uint32_t row, char ch)
+{
+    const uint32_t *glyph = glyph_of(ch);
+
+    for (uint32_t gy = 0; gy < FONT_H; gy++) {
         for (uint32_t sy = 0; sy < SCALE; sy++) {
-            volatile uint32_t *px = pixel_row(row * CELL + gy * SCALE + sy) + col * CELL;
-            for (uint32_t gx = 0; gx < 8; gx++) {
-                uint32_t color = (glyph[gy] >> gx) & 1u ? FG : BG;
+            volatile uint32_t *px = pixel_row(row * CELL_H + gy * SCALE + sy) + col * CELL_W;
+            for (uint32_t gx = 0; gx < FONT_W; gx++) {
+                uint32_t color = (glyph[gy] >> (FONT_W - 1 - gx)) & 1u ? FG : BG;
                 for (uint32_t sx = 0; sx < SCALE; sx++) {
                     *px++ = color;
                 }
@@ -224,7 +231,7 @@ static void draw_row(uint32_t r)
     for (uint32_t c = 0; c < cols; c++) {
         draw_glyph(c, r, grid[r][c]);
     }
-    clean_rows(r * CELL, CELL);
+    clean_rows(r * CELL_H, CELL_H);
 }
 
 static void render(void)
