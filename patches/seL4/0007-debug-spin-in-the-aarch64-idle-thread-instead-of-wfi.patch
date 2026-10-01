@@ -1,0 +1,50 @@
+From 2406735b8ecbbc6603c374fd3313120474836b7b Mon Sep 17 00:00:00 2001
+From: woodenwillis <william.b@millpex.org>
+Date: Thu, 1 Oct 2026 11:51:55 -0400
+Subject: [PATCH] debug: spin in the aarch64 idle thread instead of wfi
+
+Temporary experiment for the tensor-g4 bring-up; not for upstream.
+
+On caiman the core running a guest vCPU sometimes stops for good at a
+point where it waits for outstanding work: a dsb ish after a broadcast
+tlbi in the guest kernel, or entry to the EL2 IRQ vector. Meanwhile
+the idle cores sit in the idle thread's wfi. If wfi lets an idle core
+drop into a low-power state, left enabled by firmware, in which it
+doesn't acknowledge broadcast maintenance, the broadcasting core waits
+forever.
+
+In debug builds the idle thread now spins on yield, so idle cores
+never execute wfi. If the hangs stop, wfi is implicated. Interrupts
+stay unmasked in the idle thread, so wakeups are unchanged; idle
+cores just burn power.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CuTDwuvAxZ2dh5tWxWuRxe
+---
+ src/arch/arm/64/idle.S | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/src/arch/arm/64/idle.S b/src/arch/arm/64/idle.S
+index c47710bcb..db45255fe 100644
+--- a/src/arch/arm/64/idle.S
++++ b/src/arch/arm/64/idle.S
+@@ -4,11 +4,16 @@
+  * SPDX-License-Identifier: GPL-2.0-only
+  */
+ 
++#include <config.h>
+ #include <machine/assembler.h>
+ 
+ .section .text, "ax"
+ 
+ BEGIN_FUNC(idle_thread)
++#ifdef CONFIG_DEBUG_BUILD
++    1: yield
++#else
+     1: wfi
++#endif
+     b 1b
+ END_FUNC(idle_thread)
+-- 
+2.53.0
+
