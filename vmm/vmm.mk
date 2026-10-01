@@ -135,10 +135,16 @@ uartrx.o: $(TOP)/uartrx/uartrx.c
 uartrx.elf: $(UARTRX_OBJS) libsddf_util_debug.a
 	$(LD) $(LDFLAGS) $(UARTRX_OBJS) $(TRACER_LIBS) -o $@
 
-caiman.system: $(TOP)/vmm/caiman.system.S $(TOP)/guests/$(GUEST)/guest_map.h
-	$(CC) -E -P -x c -I$(TOP)/guests/$(GUEST) $< -o $@
+fbcon.o: $(TOP)/fbcon/fbcon.c
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-loader.img: vmm.elf tracer.elf uartrx.elf caiman.system
+fbcon.elf: fbcon.o libsddf_util_debug.a
+	$(LD) $(LDFLAGS) fbcon.o $(TRACER_LIBS) -o $@
+
+caiman.system: $(TOP)/vmm/caiman.system.S $(TOP)/guests/$(GUEST)/guest_map.h $(TOP)/include/hw/zumapro_dpu.h
+	$(CC) -E -P -x c -I$(TOP)/guests/$(GUEST) -I$(TOP)/include $< -o $@
+
+loader.img: vmm.elf tracer.elf uartrx.elf fbcon.elf caiman.system
 	$(MICROKIT_TOOL) caiman.system --search-path . --board $(MICROKIT_BOARD) \
 		--config $(MICROKIT_CONFIG) -o $@ -r report.txt
 
@@ -150,4 +156,4 @@ libsddf_util_console.a: $(BASE_OBJS_LIBUTIL) console_putchar.o
 	$(AR) crv $@ $^
 	$(RANLIB) $@
 
--include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) uartrx.d harness/*.d linux/*.d
+-include $(VMM_OBJS:.o=.d) $(TRACER_OBJS:.o=.d) uartrx.d fbcon.d harness/*.d linux/*.d

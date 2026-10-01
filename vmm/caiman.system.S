@@ -3,6 +3,7 @@
 #define STR(x) STR_(x)
 <!-- SPDX-License-Identifier: BSD-2-Clause -->
 #include "guest_map.h"
+#include <hw/zumapro_dpu.h>
 <system>
     <memory_region name="guest_ram" size=STR(GUEST_RAM_SIZE) />
 #ifdef GUEST_WATCHDOG_GPA
@@ -15,6 +16,10 @@
     <memory_region name="trace_archive" size="0x800000" />
     <memory_region name="trace_control" size="0x1000" />
     <memory_region name="cmd_ring" size="0x1000" />
+    <memory_region name="decon0" size="0x1000" phys_addr=STR(DECON0_PHYS) />
+    <memory_region name="dpu_rdma0" size="0x1000" phys_addr=STR(DPU_RDMA0_PHYS) />
+    <memory_region name="abl_fb" size=STR(ABL_FB_SIZE) page_size="0x200000" phys_addr=STR(ABL_FB_PHYS) />
+    <memory_region name="fbcon_ring" size="0x4000" />
 
     <protection_domain name="VMM" priority="254" smc="true">
         <program_image path="vmm.elf" />
@@ -38,6 +43,15 @@
         <map mr="uartrx_console_ring" vaddr="0x40014000" perms="rw" setvar_vaddr="uartrx_console_ring_vaddr" />
         <map mr="trace_archive" vaddr="0x50000000" perms="rw" setvar_vaddr="trace_archive_vaddr" />
         <map mr="trace_control" vaddr="0x40018000" perms="r" setvar_vaddr="trace_control_vaddr" />
+        <map mr="fbcon_ring" vaddr="0x4001c000" perms="rw" setvar_vaddr="fbcon_ring_vaddr" />
+    </protection_domain>
+
+    <protection_domain name="fbcon" priority="50" cpu="4">
+        <program_image path="fbcon.elf" />
+        <map mr="decon0" vaddr="0x30000000" perms="rw" cached="false" setvar_vaddr="decon_vaddr" />
+        <map mr="dpu_rdma0" vaddr="0x30001000" perms="r" cached="false" setvar_vaddr="rdma_vaddr" />
+        <map mr="abl_fb" vaddr="0x40000000" perms="rw" setvar_vaddr="fb_vaddr" />
+        <map mr="fbcon_ring" vaddr="0x50000000" perms="rw" setvar_vaddr="fbcon_ring_vaddr" />
     </protection_domain>
 
     <protection_domain name="uartrx" priority="100" cpu="2">
@@ -62,5 +76,10 @@
     <channel>
         <end pd="uartrx" id="2" />
         <end pd="VMM" id="2" />
+    </channel>
+
+    <channel>
+        <end pd="tracer" id="3" />
+        <end pd="fbcon" id="1" />
     </channel>
 </system>

@@ -13,6 +13,7 @@
 
 #define VMM_CH 1
 #define UARTRX_CH 2
+#define FBCON_CH 3
 
 #define STRINGIFY(x) #x
 #define VERSION_PREFIX(tag, v) tag STRINGIFY(v) " "
@@ -27,8 +28,11 @@ uintptr_t console_ring_vaddr;
 uintptr_t uartrx_console_ring_vaddr;
 uintptr_t trace_archive_vaddr;
 uintptr_t trace_control_vaddr;
+uintptr_t fbcon_ring_vaddr;
 
 static uint64_t dumps_done;
+static uint64_t mirror_dropped;
+static bool mirror_pending;
 
 static char line[LINE_MAX];
 
@@ -87,13 +91,84 @@ static void send_header(void)
     emit_line(HEADER_PREFIX, &h, sizeof(h));
 }
 
+static bool mirror_has_room(const struct console_ring *ring, uint64_t head, uint64_t bytes)
+{
+    return head - __atomic_load_n(&ring->tail, __ATOMIC_ACQUIRE) + bytes <= CONSOLE_RING_CAPACITY;
+}
+
+static void mirror_store(struct console_ring *ring, uint64_t *head, const char *s)
+{
+    for (; *s != '\0'; s++) {
+        ring->buf[(*head)++ % CONSOLE_RING_CAPACITY] = *s;
+    }
+}
+
+static void mirror_report_dropped(struct console_ring *ring, uint64_t *head)
+{
+    char buf[21];
+    int pos = sizeof(buf) - 1;
+    uint64_t val = mirror_dropped;
+
+    buf[pos] = '\0';
+    do {
+        buf[--pos] = (char)('0' + val % 10);
+        val /= 10;
+    } while (val != 0);
+    mirror_store(ring, head, "\n[fbcon dropped ");
+    mirror_store(ring, head, &buf[pos]);
+    mirror_store(ring, head, " bytes]\n");
+    mirror_dropped = 0;
+}
+
+static void mirror_putc(char c)
+{
+    struct console_ring *ring = (struct console_ring *)fbcon_ring_vaddr;
+    uint64_t head = __atomic_load_n(&ring->head, __ATOMIC_RELAXED);
+
+    if (mirror_dropped != 0 && mirror_has_room(ring, head, 64)) {
+        mirror_report_dropped(ring, &head);
+    }
+    if (mirror_dropped != 0 || !mirror_has_room(ring, head, 1)) {
+        mirror_dropped++;
+        __atomic_store_n(&ring->head, head, __ATOMIC_RELEASE);
+        return;
+    }
+    ring->buf[head++ % CONSOLE_RING_CAPACITY] = c;
+    __atomic_store_n(&ring->head, head, __ATOMIC_RELEASE);
+    mirror_pending = c != '\n';
+    if (c == '\n') {
+        microkit_notify(FBCON_CH);
+    }
+}
+
+static void console_putc(char c)
+{
+    microkit_dbg_putc(c);
+    mirror_putc(c);
+}
+
+static void console_puts(const char *s)
+{
+    for (; *s != '\0'; s++) {
+        console_putc(*s);
+    }
+}
+
+static void mirror_notify(void)
+{
+    if (mirror_pending) {
+        mirror_pending = false;
+        microkit_notify(FBCON_CH);
+    }
+}
+
 static void drain_console(uintptr_t ring_vaddr)
 {
     struct console_ring *ring = (struct console_ring *)ring_vaddr;
     uint64_t tail = __atomic_load_n(&ring->tail, __ATOMIC_RELAXED);
 
     while (tail != __atomic_load_n(&ring->head, __ATOMIC_ACQUIRE)) {
-        microkit_dbg_putc(ring->buf[tail % CONSOLE_RING_CAPACITY]);
+        console_putc(ring->buf[tail % CONSOLE_RING_CAPACITY]);
         tail++;
         __atomic_store_n(&ring->tail, tail, __ATOMIC_RELEASE);
     }
@@ -133,7 +208,7 @@ static void put_decimal(uint64_t val)
         buf[--pos] = (char)('0' + val % 10);
         val /= 10;
     } while (val != 0);
-    microkit_dbg_puts(&buf[pos]);
+    console_puts(&buf[pos]);
 }
 
 static void dump_archive(void)
@@ -149,11 +224,11 @@ static void dump_archive(void)
         records_since_header++;
         emit_line(RECORD_PREFIX, &archive->records[i], TRACE_RECORD_SIZE);
     }
-    microkit_dbg_puts("TRACER|INFO: dumped ");
+    console_puts("TRACER|INFO: dumped ");
     put_decimal(archive->count);
-    microkit_dbg_puts(" records, ");
+    console_puts(" records, ");
     put_decimal(archive->not_archived);
-    microkit_dbg_puts(" not archived (archive full)\n");
+    console_puts(" not archived (archive full)\n");
 }
 
 static void maybe_dump(void)
@@ -174,11 +249,12 @@ void init(void)
 void notified(microkit_channel ch)
 {
     if (ch != VMM_CH && ch != UARTRX_CH) {
-        microkit_dbg_puts("tracer: notification on unexpected channel\n");
+        console_puts("tracer: notification on unexpected channel\n");
         return;
     }
     drain_trace();
     drain_console(console_ring_vaddr);
     drain_console(uartrx_console_ring_vaddr);
     maybe_dump();
+    mirror_notify();
 }
