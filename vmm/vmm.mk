@@ -72,8 +72,10 @@ vpath %.S $(TOP)/vmm
 
 all: loader.img
 
-harness/%.o: $(TOP)/guests/harness/%.c | harness
-	$(CC) $(HARNESS_CFLAGS) -c -o $@ $<
+HARNESS_DEFINES := $(if $(HARNESS_TLBI_STRESS),-DHARNESS_TLBI_STRESS)
+
+harness/%.o: $(TOP)/guests/harness/%.c FORCE_FLAGS | harness
+	$(CC) $(HARNESS_CFLAGS) $(HARNESS_DEFINES) -c -o $@ $<
 
 harness/%.o: $(TOP)/guests/harness/%.S | harness
 	$(CC) $(HARNESS_CFLAGS) -c -o $@ $<
@@ -146,13 +148,13 @@ FBCON_MARGIN_SIDE ?= 32
 FBCON_CFLAGS := -DFBCON_SCALE=$(FBCON_SCALE)u -DFBCON_MARGIN_TOP=$(FBCON_MARGIN_TOP)u \
 	-DFBCON_MARGIN_BOTTOM=$(FBCON_MARGIN_BOTTOM)u -DFBCON_MARGIN_SIDE=$(FBCON_MARGIN_SIDE)u
 
-fbcon_font.h: $(SPLEEN_FONT_DIR)/$(FBCON_FONT).bdf $(TOP)/tools/bdf2c.py FORCE_FBCON_FLAGS
+fbcon_font.h: $(SPLEEN_FONT_DIR)/$(FBCON_FONT).bdf $(TOP)/tools/bdf2c.py FORCE_FLAGS
 	python3 $(TOP)/tools/bdf2c.py $< $@
 
-fbcon.o: $(TOP)/fbcon/fbcon.c fbcon_font.h FORCE_FBCON_FLAGS
+fbcon.o: $(TOP)/fbcon/fbcon.c fbcon_font.h FORCE_FLAGS
 	$(CC) $(CFLAGS) $(FBCON_CFLAGS) -I. -c -o $@ $<
 
-FORCE_FBCON_FLAGS:
+FORCE_FLAGS:
 
 coresight.o: $(TOP)/diag/coresight.c
 	$(CC) $(CFLAGS) -c -o $@ $<
