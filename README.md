@@ -1,23 +1,23 @@
 # Tensor-seL4
 
-Porting the Google Pixel 9 Pro (`caiman`, Tensor G4 / `zumapro`) to seL4 Microkit, then using seL4 as a hypervisor to run isolated VMs on the real hardware. Not an emulator, not QEMU—the actual phone.
+Porting the Google Pixel 9 Pro (`caiman`, Tensor G4 / `zumapro`) to seL4 Microkit, then using seL4 as a hypervisor to run isolated VMs on the phone's hardware. 
 
-## Why?
+## Why do this?
 
-Because Android vendor stacks are a black box. The proprietary blobs talk straight to the hardware and we're basically supposed to take their word for whatever they're doing.
+Because we should be able to audit and modify what is running on our devices.
 
-This project flips that around. The vendor stack runs *inside* a VM, and seL4 sits outside it watching everything it does:
+By isolating the vendor's proprietary blobs and running them with seL4 as hypervisor we can intercept:
 
 - every MMIO access
 - every interrupt
 - every SMC
 - every DMA setup
 
-From outside the VM the blob can't see us and it can't lie to us. As far as it knows it's just running on the phone like normal.
+As far as it knows it's just running on the phone like normal.
 
 ## Goal
 
-Give the open source community a controlled, reproducible environment to study what the vendor stack actually does on real Tensor hardware—not what it reports about itself.
+Give the open source community a controlled, reproducible environment to study blob's behaviors for reverse engineering purposes.
 
 ## Target
 
@@ -37,8 +37,6 @@ Pretty simple on paper:
 2. seL4 acts as the hypervisor
 3. the proprietary Android vendor stack runs in an isolated VM on top
 4. every MMIO access, interrupt, SMC and DMA setup it performs gets watched from outside the VM
-
-The on paper part is doing a lot of heavy lifting
 
 ## Contributing
 
